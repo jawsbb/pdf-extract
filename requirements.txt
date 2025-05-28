@@ -1,0 +1,6 @@
+PyMuPDF==1.23.14
+openai>=1.52.0
+pandas==2.1.4
+Pillow==10.1.0
+python-dotenv==1.0.0
+reportlab==4.0.7 
