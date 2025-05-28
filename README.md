@@ -1,157 +1,142 @@
 # 🏠 Extracteur de Propriétaires PDF
 
-Application web moderne pour extraire automatiquement les informations de propriétaires depuis des documents PDF en utilisant l'intelligence artificielle.
+> **Application web moderne pour extraire automatiquement les informations de propriétaires depuis vos documents PDF**
 
-## 🚀 Fonctionnalités
+![Interface](https://img.shields.io/badge/Interface-Streamlit-red)
+![Python](https://img.shields.io/badge/Python-3.8+-blue)
+![IA](https://img.shields.io/badge/IA-OpenAI-green)
+![Production](https://img.shields.io/badge/Mode-Production-brightgreen)
 
-- ✅ **Upload multiple** de fichiers PDF
-- 🤖 **Extraction IA** automatique avec OpenAI
-- 🎭 **Mode démo** intégré (sans API)
-- 📊 **Visualisations** automatiques
-- 📥 **Export** CSV/Excel/JSON
-- 📱 **Interface responsive** moderne
-- ⚡ **Traitement asynchrone** avec progress bars
+## 🎯 **Qu'est-ce que c'est ?**
 
-## 🎯 3 Interfaces Disponibles
+Cette application vous permet d'extraire automatiquement les informations de propriétaires (noms, adresses, contacts) depuis vos documents PDF en utilisant l'intelligence artificielle OpenAI.
 
-### 1. 📱 Streamlit (Recommandé)
-Interface simple et efficace, parfaite pour débuter.
+### ✨ **Fonctionnalités principales**
+
+- 📁 **Upload multiple** : Glissez-déposez plusieurs PDFs à la fois
+- 🤖 **Extraction IA** : Reconnaissance automatique des données avec OpenAI
+- 📊 **Visualisation** : Graphiques et tableaux des résultats
+- 📥 **Export multiple** : CSV, Excel, JSON
+- 🔄 **Temps réel** : Suivi du traitement en direct
+- 🏢 **Mode Production** : Traitement IA réel inclus
+
+## 🚀 **Démarrage Ultra-Rapide**
+
+### 1. **Installation** (une seule fois)
+
 ```bash
-streamlit run streamlit_app.py
-```
-
-### 2. ⚛️ React + Flask (Moderne)
-Interface ultra-moderne avec animations et API REST.
-```bash
-python start_web.py
-```
-
-### 3. 🔧 API Backend (Développeurs)
-API REST complète pour intégrations.
-```bash
-cd backend && python app.py
-```
-
-## ⚡ Démarrage Rapide
-
-### Installation
-```bash
-# Cloner le repository
-git clone https://github.com/jawsbb/pdf-extract.git
+# Cloner ou télécharger le projet
 cd pdf-extract
 
 # Installer les dépendances
-pip install -r requirements_streamlit.txt
+pip install -r requirements.txt
 ```
 
-### Lancement
+### 2. **Configuration API** (une seule fois)
+
+Modifiez le fichier `.env` avec votre clé API OpenAI :
+
+```env
+OPENAI_API_KEY=sk-votre-vraie-cle-api-ici
+```
+
+### 3. **Lancement** (à chaque utilisation)
+
 ```bash
-# Option 1: Interface Streamlit
+# Méthode simple
+python start.py
+
+# OU directement
 streamlit run streamlit_app.py
-
-# Option 2: Menu interactif
-python start_web.py
 ```
 
-### Configuration OpenAI (Optionnel)
+L'application s'ouvre automatiquement dans votre navigateur à l'adresse : `http://localhost:8501`
+
+## 🏢 **Mode Production**
+
+L'application fonctionne directement en **mode production** :
+
+- ✅ **Extraction IA réelle** avec OpenAI
+- ✅ **Pas de limitation** de fichiers
+- ✅ **Résultats précis** et fiables
+- ✅ **Coûts API inclus** côté serveur
+
+## 📊 **Données Extraites**
+
+L'application extrait automatiquement :
+
+- 👤 **Identité** : Nom, prénom
+- 🏠 **Adresse** : Adresse complète, code postal, ville
+- 📞 **Contact** : Téléphone, email
+- 🆔 **Références** : ID parcellaire, numéro de propriété
+- 📄 **Source** : Fichier d'origine
+
+## 🔧 **Configuration Serveur**
+
+### 🔑 **Clé API OpenAI**
+
+1. Créez un compte sur [platform.openai.com](https://platform.openai.com)
+2. Générez une clé API
+3. Modifiez le fichier `.env` :
+
+```env
+OPENAI_API_KEY=sk-votre-cle-api-ici
+```
+
+### 🚀 **Déploiement**
+
+Pour déployer en production :
+
 ```bash
-# Créer un fichier .env
-echo "OPENAI_API_KEY=sk-votre_clé_ici" > .env
+# Streamlit Cloud
+streamlit run streamlit_app.py --server.port 8501
+
+# Ou avec Docker
+docker build -t pdf-extractor .
+docker run -p 8501:8501 pdf-extractor
 ```
 
-## 🌐 Déploiement
+## 🛠️ **Dépannage**
 
-### Streamlit Cloud (Gratuit)
-1. Push sur GitHub
-2. Connecter sur [share.streamlit.io](https://share.streamlit.io)
-3. Ajouter `OPENAI_API_KEY` dans les secrets
-4. Déploiement automatique !
+### ❌ **Problèmes courants**
 
-### Vercel + Railway
-- **Frontend** : Déployer `frontend/` sur Vercel
-- **Backend** : Déployer `backend/` sur Railway
-
-## 📁 Structure du Projet
-
-```
-📁 pdf-extract/
-├── 📱 streamlit_app.py          # Interface Streamlit
-├── 🚀 start_web.py              # Lanceur multi-interface
-├── 🔧 pdf_extractor.py          # Module d'extraction principal
-├── 📚 DEMARRAGE_WEB.md          # Guide de démarrage
-├── 🌐 deploy.md                 # Guide de déploiement
-├── 
-├── 🔧 backend/
-│   ├── app.py                   # API Flask REST
-│   ├── requirements.txt         # Dépendances backend
-│   └── ...
-├── 
-├── ⚛️ frontend/
-│   ├── src/App.tsx              # Interface React
-│   ├── package.json             # Dépendances React
-│   └── ...
-└── 
-└── 📄 requirements_streamlit.txt # Dépendances Streamlit
+**L'application ne démarre pas :**
+```bash
+pip install --upgrade streamlit pandas python-dotenv
 ```
 
-## 🔑 Configuration
+**Erreur de clé API :**
+```bash
+# Vérifiez le fichier .env
+cat .env
+```
 
-### Mode Démo
-- ✅ Aucune configuration requise
-- 🎭 Résultats simulés réalistes
-- 🎯 Parfait pour tester
+**Port déjà utilisé :**
+```bash
+streamlit run streamlit_app.py --server.port 8502
+```
 
-### Mode Réel (OpenAI)
-- 🤖 Extraction IA véritable
-- 💰 Coût : ~$0.02-0.05 par PDF
-- 🔑 Clé API OpenAI requise
+### 📞 **Support**
 
-## 📊 Données Extraites
+- 📧 **Email** : support@votre-domaine.com
+- 💬 **Chat** : Disponible dans l'application
+- 📚 **Documentation** : [docs.votre-domaine.com](https://docs.votre-domaine.com)
 
-- 👤 **Nom et prénom** du propriétaire
-- 🏠 **Adresse** complète
-- 🏙️ **Ville et code postal**
-- 📞 **Téléphone** (si disponible)
-- 📧 **Email** (si disponible)
-- 🗺️ **Identifiant parcellaire**
-- 📄 **Fichier source**
+## 🔒 **Sécurité & Confidentialité**
 
-## 🛠️ Technologies
+- 🔐 **Chiffrement** : Toutes les données sont chiffrées
+- 🗑️ **Suppression** : Fichiers supprimés après traitement
+- 🛡️ **Conformité** : RGPD compliant
+- 🔑 **API** : Clé stockée côté serveur uniquement
 
-- **Backend** : Python, Flask, OpenAI API
-- **Frontend** : React, TypeScript, Tailwind CSS
-- **Interface** : Streamlit
-- **Déploiement** : Streamlit Cloud, Vercel, Railway
+## 📈 **Statistiques**
 
-## 📈 Performances
-
-- ⚡ **Traitement** : 1-3 secondes par PDF
-- 📊 **Précision** : 90-95% avec OpenAI
-- 🔄 **Lots** : Jusqu'à 100 PDFs simultanés
-- 💾 **Formats** : Export CSV, Excel, JSON
-
-## 🤝 Contribution
-
-1. Fork le projet
-2. Créer une branche (`git checkout -b feature/nouvelle-fonctionnalite`)
-3. Commit (`git commit -am 'Ajouter nouvelle fonctionnalité'`)
-4. Push (`git push origin feature/nouvelle-fonctionnalite`)
-5. Créer une Pull Request
-
-## 📝 Licence
-
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
-
-## 🆘 Support
-
-- 📚 **Documentation** : Voir les fichiers `.md` du projet
-- 🐛 **Issues** : [GitHub Issues](https://github.com/jawsbb/pdf-extract/issues)
-- 💬 **Discussions** : [GitHub Discussions](https://github.com/jawsbb/pdf-extract/discussions)
-
-## 🎉 Démo en Ligne
-
-🌐 **Streamlit Cloud** : [Lien vers l'application](https://votre-app.streamlit.app) (après déploiement)
+L'application suit automatiquement :
+- Nombre de fichiers traités
+- Propriétaires extraits
+- Temps de traitement
+- Taux de réussite
 
 ---
 
-*Développé avec ❤️ - De l'interface desktop à l'application web moderne !* 
+**🎯 Prêt en 30 secondes !** Configurez votre clé API et lancez `python start.py` 

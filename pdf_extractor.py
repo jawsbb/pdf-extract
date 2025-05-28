@@ -33,15 +33,22 @@ logger = logging.getLogger(__name__)
 class PDFPropertyExtractor:
     """Classe principale pour l'extraction d'informations de propriétaires depuis des PDFs."""
     
-    def __init__(self, api_key: str, input_dir: str = "input", output_dir: str = "output"):
+    def __init__(self, input_dir: str = "input", output_dir: str = "output"):
         """
         Initialise l'extracteur.
         
         Args:
-            api_key: Clé API OpenAI
             input_dir: Dossier contenant les PDFs
             output_dir: Dossier de sortie pour les résultats
         """
+        # Charger les variables d'environnement
+        load_dotenv()
+        
+        # Récupérer la clé API depuis les variables d'environnement
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("La clé API OpenAI n'est pas configurée. Veuillez définir OPENAI_API_KEY dans le fichier .env")
+        
         self.client = OpenAI(api_key=api_key)
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
@@ -65,43 +72,54 @@ class PDFPropertyExtractor:
         logger.info(f"Trouvé {len(pdf_files)} fichier(s) PDF dans {self.input_dir}")
         return pdf_files
 
-    def pdf_to_image(self, pdf_path: Path) -> Optional[bytes]:
+    def pdf_to_images(self, pdf_path: Path) -> List[bytes]:
         """
-        Convertit la première page d'un PDF en image PNG.
+        Convertit toutes les pages d'un PDF en images PNG.
         
         Args:
             pdf_path: Chemin vers le fichier PDF
             
         Returns:
-            Bytes de l'image PNG ou None en cas d'erreur
+            Liste des bytes des images PNG ou liste vide en cas d'erreur
         """
         try:
-            logger.info(f"Conversion de la première page de {pdf_path.name} en image")
+            logger.info(f"Conversion de toutes les pages de {pdf_path.name} en images")
             
             # Ouvrir le PDF
             doc = fitz.open(pdf_path)
             
             if len(doc) == 0:
                 logger.error(f"Le PDF {pdf_path.name} est vide")
-                return None
+                return []
             
-            # Récupérer la première page
-            page = doc[0]
+            images = []
             
-            # Convertir en image avec une résolution élevée
-            mat = fitz.Matrix(2.0, 2.0)  # Zoom x2 pour une meilleure qualité
-            pix = page.get_pixmap(matrix=mat)
-            
-            # Convertir en PNG
-            img_data = pix.tobytes("png")
+            # Traiter chaque page
+            for page_num in range(len(doc)):
+                try:
+                    page = doc[page_num]
+                    
+                    # Convertir chaque page en image avec une résolution élevée
+                    mat = fitz.Matrix(3.0, 3.0)  # Augmenté de 2.0 à 3.0 pour une meilleure qualité
+                    pix = page.get_pixmap(matrix=mat)
+                    
+                    # Convertir en PNG
+                    img_data = pix.tobytes("png")
+                    images.append(img_data)
+                    
+                    logger.info(f"Page {page_num + 1}/{len(doc)} convertie pour {pdf_path.name}")
+                    
+                except Exception as e:
+                    logger.error(f"Erreur lors de la conversion de la page {page_num + 1} de {pdf_path.name}: {str(e)}")
+                    continue
             
             doc.close()
-            logger.info(f"Conversion réussie pour {pdf_path.name}")
-            return img_data
+            logger.info(f"Conversion réussie pour {pdf_path.name}: {len(images)} page(s) traitée(s)")
+            return images
             
         except Exception as e:
             logger.error(f"Erreur lors de la conversion de {pdf_path.name}: {str(e)}")
-            return None
+            return []
 
     def extract_info_with_gpt4o(self, image_data: bytes, filename: str) -> Optional[Dict]:
         """
@@ -122,34 +140,38 @@ class PDFPropertyExtractor:
             
             # Prompt détaillé pour l'extraction
             prompt = """
-            Analyse cette image qui contient des informations de propriétaires immobiliers.
-            
-            Extrait TOUTES les informations de propriétaires visibles et retourne un JSON avec la structure suivante :
-            
-            {
-              "owners": [
-                {
-                  "nom": "NOM_FAMILLE",
-                  "prenom": "PRENOM",
-                  "street_address": "ADRESSE_COMPLETE_RUE",
-                  "post_code": "CODE_POSTAL",
-                  "city": "VILLE",
-                  "numero_proprietaire": "NUMERO_PROPRIETAIRE",
-                  "department": "DEPARTEMENT_2_CHIFFRES",
-                  "commune": "COMMUNE_3_CHIFFRES",
-                  "droit_reel": "TYPE_DROIT_REEL"
-                }
-              ]
-            }
-            
-            INSTRUCTIONS IMPORTANTES :
-            - Extrait TOUS les propriétaires visibles dans l'image
-            - Garde les zéros initiaux pour département et commune (ex: "01", "001")
-            - Pour le droit réel, utilise les termes exacts trouvés (Propriétaire, Indivision, Usufruitier, etc.)
-            - Si une information n'est pas visible, utilise "N/A"
-            - Assure-toi que le JSON est valide
-            - Ne retourne QUE le JSON, sans texte supplémentaire
-            """
+Extrais TOUTES les propriétés de ce document cadastral.
+
+Pour chaque propriété, retourne :
+{
+  "proprietes": [
+    {
+      "nom": "nom propriétaire",
+      "prenom": "prénom", 
+      "adresse_proprietaire": "adresse domicile propriétaire",
+      "post_code": "code postal",
+      "city": "ville",
+      "numero_proprietaire": "numéro MAJIC",
+      "department": "code département 2 chiffres",
+      "commune": "code commune 3 chiffres", 
+      "droit_reel": "type de droit",
+      "section": "section cadastrale",
+      "numero_plan": "numéro plan",
+      "street_address": "lieu-dit ou localisation propriété",
+      "contenance": "surface 7 chiffres",
+      "HA": "hectares 2 chiffres",
+      "A": "ares 2 chiffres",
+      "CA": "centiares 3 chiffres"
+    }
+  ]
+}
+
+RÈGLES :
+- Une entrée par propriété (même propriétaire = plusieurs entrées si plusieurs propriétés)
+- Si info manquante → "N/A"
+- JSON valide uniquement
+- Pas de texte en dehors du JSON
+"""
             
             response = self.client.chat.completions.create(
                 model="gpt-4o",
@@ -168,7 +190,7 @@ class PDFPropertyExtractor:
                         ]
                     }
                 ],
-                max_tokens=1000,
+                max_tokens=2500,
                 temperature=0.1
             )
             
@@ -181,16 +203,96 @@ class PDFPropertyExtractor:
             elif response_text.startswith('```'):
                 response_text = response_text[3:-3]
             
-            result = json.loads(response_text)
-            logger.info(f"Extraction réussie pour {filename}: {len(result.get('owners', []))} propriétaire(s) trouvé(s)")
-            return result
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Erreur de parsing JSON pour {filename}: {str(e)}")
-            logger.error(f"Réponse reçue: {response_text}")
-            return None
+            try:
+                result = json.loads(response_text)
+                if "proprietes" in result and result["proprietes"]:
+                    logger.info(f"Extraction réussie pour {filename}: {len(result['proprietes'])} propriété(s) trouvé(s)")
+                    return result
+                else:
+                    logger.warning(f"❌ Aucune propriété trouvée pour {filename}")
+                    return None
+            except json.JSONDecodeError as e:
+                logger.error(f"Erreur de parsing JSON pour {filename}: {e}")
+                logger.error(f"Réponse reçue: {response_text[:500]}...")
+                
+                # Tentative de récupération avec extraction simplifiée
+                logger.info(f"Tentative de récupération pour {filename}")
+                return self.fallback_extraction(image_data, filename)
+                
         except Exception as e:
-            logger.error(f"Erreur lors de l'extraction GPT-4o pour {filename}: {str(e)}")
+            logger.error(f"Erreur lors de l'extraction GPT-4o pour {filename}: {e}")
+            return None
+
+    def fallback_extraction(self, image_data: bytes, filename: str) -> Optional[Dict]:
+        """Extraction de secours avec prompt simplifié"""
+        try:
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            
+            # Prompt simplifié pour la récupération
+            simple_prompt = """
+Extrais les propriétés de ce document. Format JSON simple :
+{
+  "proprietes": [
+    {
+      "nom": "nom",
+      "prenom": "prénom",
+      "section": "section",
+      "numero_plan": "numéro",
+      "street_address": "lieu-dit",
+      "contenance": "surface"
+    }
+  ]
+}
+JSON uniquement, pas de texte.
+"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": simple_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1500,
+                temperature=0.1
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            
+            # Nettoyage du JSON
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].strip()
+            
+            result = json.loads(response_text)
+            if "proprietes" in result and result["proprietes"]:
+                # Compléter les champs manquants avec "N/A"
+                for prop in result["proprietes"]:
+                    for field in ["nom", "prenom", "adresse_proprietaire", "post_code", "city", 
+                                "numero_proprietaire", "department", "commune", "droit_reel", 
+                                "section", "numero_plan", "street_address", "contenance", "HA", "A", "CA"]:
+                        if field not in prop:
+                            prop[field] = "N/A"
+                
+                logger.info(f"✅ Récupération réussie pour {filename}: {len(result['proprietes'])} propriété(s)")
+                return result
+            else:
+                logger.warning(f"❌ Récupération échouée pour {filename}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération pour {filename}: {e}")
             return None
 
     def generate_parcel_id(self, department: str, commune: str, section: str = None, plan_number: int = None) -> str:
@@ -221,6 +323,26 @@ class PDFPropertyExtractor:
         parcel_id = f"{dept_formatted}{commune_formatted}{section_formatted}{plan_formatted}"
         return parcel_id
 
+    def decompose_contenance(self, contenance: str) -> Dict[str, str]:
+        """
+        Décompose une contenance de 7 chiffres en hectares, ares et centiares.
+        
+        Args:
+            contenance: Chaîne de 7 chiffres (ex: "0130221")
+            
+        Returns:
+            Dictionnaire avec les clés HA, A, CA
+        """
+        if not contenance or contenance == "N/A" or len(contenance) != 7 or not contenance.isdigit():
+            return {"HA": "N/A", "A": "N/A", "CA": "N/A"}
+        
+        # Décomposer selon le format : HHAACC
+        ha = contenance[:2]  # 2 premiers chiffres (hectares)
+        a = contenance[2:4]  # 2 suivants (ares)
+        ca = contenance[4:7]  # 3 derniers (centiares)
+        
+        return {"HA": ha, "A": a, "CA": ca}
+
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -233,69 +355,325 @@ class PDFPropertyExtractor:
         """
         logger.info(f"🔄 Traitement de {pdf_path.name}")
         
-        # Convertir en image
-        image_data = self.pdf_to_image(pdf_path)
-        if image_data is None:
-            logger.error(f"❌ Échec de la conversion en image pour {pdf_path.name}")
+        # Convertir en images
+        images = self.pdf_to_images(pdf_path)
+        if not images:
+            logger.error(f"❌ Échec de la conversion en images pour {pdf_path.name}")
             return []
         
-        # Extraire les informations avec GPT-4o
-        extracted_data = self.extract_info_with_gpt4o(image_data, pdf_path.name)
-        if extracted_data is None:
-            logger.error(f"❌ Échec de l'extraction pour {pdf_path.name}")
+        # Extraire les informations avec GPT-4o pour chaque page
+        all_page_data = []
+        for page_num, image_data in enumerate(images, 1):
+            logger.info(f"Extraction des données de la page {page_num}/{len(images)} pour {pdf_path.name}")
+            extracted_data = self.extract_info_with_gpt4o(image_data, f"{pdf_path.name} (page {page_num})")
+            if extracted_data and 'proprietes' in extracted_data:
+                # Ajouter le numéro de page à chaque propriété pour le suivi
+                for prop in extracted_data['proprietes']:
+                    prop['_source_page'] = page_num
+                all_page_data.append({
+                    'page': page_num,
+                    'data': extracted_data['proprietes']
+                })
+            elif extracted_data is None:
+                logger.warning(f"❌ Échec de l'extraction pour la page {page_num} de {pdf_path.name}")
+        
+        if not all_page_data:
+            logger.error(f"❌ Aucune donnée extraite pour {pdf_path.name}")
             return []
         
-        # Traiter chaque propriétaire
-        processed_owners = []
-        for owner in extracted_data.get('owners', []):
+        # Combiner intelligemment les données des pages
+        combined_properties = self.combine_multi_page_data(all_page_data, pdf_path.name)
+        
+        # Traiter chaque propriété combinée
+        processed_properties = []
+        for property_data in combined_properties:
             # Générer l'ID parcellaire
             parcel_id = self.generate_parcel_id(
-                department=owner.get('department', '00'),
-                commune=owner.get('commune', '000')
+                department=property_data.get('department', '00'),
+                commune=property_data.get('commune', '000'),
+                section=property_data.get('section', self.default_section),
+                plan_number=int(property_data.get('numero_plan', self.default_plan_number)) if property_data.get('numero_plan', '').isdigit() else self.default_plan_number
             )
             
-            # Ajouter l'ID parcellaire aux données
-            owner['id_parcelle'] = parcel_id
-            owner['fichier_source'] = pdf_path.name
+            # Gérer la contenance - utiliser les champs HA/A/CA s'ils existent, sinon décomposer
+            contenance = property_data.get('contenance', 'N/A')
+            if property_data.get('HA') and property_data.get('A') and property_data.get('CA'):
+                # Utiliser les champs déjà décomposés
+                ha = property_data.get('HA', 'N/A')
+                a = property_data.get('A', 'N/A')
+                ca = property_data.get('CA', 'N/A')
+                # Reconstituer la contenance si elle n'existe pas
+                if contenance == 'N/A' and ha != 'N/A' and a != 'N/A' and ca != 'N/A':
+                    contenance = f"{ha.zfill(2)}{a.zfill(2)}{ca.zfill(3)}"
+            else:
+                # Décomposer la contenance existante
+                contenance_decomposed = self.decompose_contenance(contenance)
+                ha = contenance_decomposed['HA']
+                a = contenance_decomposed['A']
+                ca = contenance_decomposed['CA']
             
-            processed_owners.append(owner)
+            # Ajouter toutes les données
+            property_data['id_parcelle'] = parcel_id
+            property_data['fichier_source'] = pdf_path.name
+            property_data['HA'] = ha
+            property_data['A'] = a
+            property_data['CA'] = ca
+            
+            # S'assurer que la contenance est bien formatée
+            if contenance != 'N/A':
+                property_data['contenance'] = contenance
+            
+            # Nettoyer les champs techniques
+            property_data.pop('_source_page', None)
+            property_data.pop('_is_owner_info', None)
+            property_data.pop('_is_property_info', None)
+            
+            processed_properties.append(property_data)
         
-        logger.info(f"✅ {pdf_path.name} traité avec succès - {len(processed_owners)} propriétaire(s)")
-        return processed_owners
+        logger.info(f"✅ {pdf_path.name} traité avec succès - {len(processed_properties)} propriété(s)")
+        return processed_properties
 
-    def export_to_csv(self, all_owners: List[Dict], output_filename: str = "output.csv") -> None:
+    def combine_multi_page_data(self, all_page_data: List[Dict], filename: str) -> List[Dict]:
+        """
+        Combine intelligemment les données de plusieurs pages.
+        
+        Args:
+            all_page_data: Liste des données extraites par page
+            filename: Nom du fichier pour le logging
+            
+        Returns:
+            Liste des propriétés combinées
+        """
+        if len(all_page_data) == 1:
+            # Une seule page, retourner directement
+            return all_page_data[0]['data']
+        
+        # Analyser le contenu de chaque page
+        owner_pages = []  # Pages avec principalement des infos propriétaires
+        property_pages = []  # Pages avec principalement des infos parcelles
+        complete_pages = []  # Pages avec infos complètes
+        
+        for page_info in all_page_data:
+            page_num = page_info['page']
+            properties = page_info['data']
+            
+            # Analyser chaque propriété de la page
+            owner_info_count = 0
+            property_info_count = 0
+            complete_count = 0
+            
+            for prop in properties:
+                has_owner_info = self.has_complete_owner_info(prop)
+                has_property_info = self.has_complete_property_info(prop)
+                
+                if has_owner_info and has_property_info:
+                    complete_count += 1
+                elif has_owner_info:
+                    owner_info_count += 1
+                elif has_property_info:
+                    property_info_count += 1
+            
+            # Classifier la page
+            if complete_count > 0:
+                complete_pages.append(page_info)
+                logger.info(f"Page {page_num} de {filename}: {complete_count} propriété(s) complète(s)")
+            elif owner_info_count > property_info_count:
+                owner_pages.append(page_info)
+                logger.info(f"Page {page_num} de {filename}: principalement des infos propriétaires ({owner_info_count})")
+            elif property_info_count > owner_info_count:
+                property_pages.append(page_info)
+                logger.info(f"Page {page_num} de {filename}: principalement des infos parcelles ({property_info_count})")
+            else:
+                complete_pages.append(page_info)
+                logger.info(f"Page {page_num} de {filename}: contenu mixte")
+        
+        # Stratégie de combinaison
+        if complete_pages:
+            # Si on a des pages complètes, les utiliser en priorité
+            combined = []
+            for page_info in complete_pages:
+                combined.extend(page_info['data'])
+            
+            # Ajouter les données des autres pages si elles apportent des infos supplémentaires
+            if owner_pages or property_pages:
+                combined.extend(self.merge_incomplete_pages(owner_pages, property_pages, filename))
+            
+            return combined
+        
+        elif owner_pages and property_pages:
+            # Combiner les pages d'infos propriétaires avec les pages d'infos parcelles
+            logger.info(f"Combinaison des pages séparées pour {filename}")
+            return self.merge_incomplete_pages(owner_pages, property_pages, filename)
+        
+        else:
+            # Fallback : combiner toutes les données
+            combined = []
+            for page_info in all_page_data:
+                combined.extend(page_info['data'])
+            return combined
+
+    def has_complete_owner_info(self, prop: Dict) -> bool:
+        """Vérifie si une propriété a des informations complètes sur le propriétaire."""
+        required_fields = ['nom', 'prenom']
+        optional_fields = ['adresse_proprietaire', 'post_code', 'city', 'numero_proprietaire']
+        
+        # Au moins les champs requis
+        has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
+        
+        # Au moins un champ optionnel
+        has_optional = any(prop.get(field, 'N/A') not in ['N/A', '', None] for field in optional_fields)
+        
+        return has_required and has_optional
+
+    def has_complete_property_info(self, prop: Dict) -> bool:
+        """Vérifie si une propriété a des informations complètes sur la parcelle."""
+        required_fields = ['section', 'numero_plan']
+        optional_fields = ['street_address', 'contenance', 'droit_reel', 'department', 'commune']
+        
+        # Au moins les champs requis
+        has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
+        
+        # Au moins un champ optionnel
+        has_optional = any(prop.get(field, 'N/A') not in ['N/A', '', None] for field in optional_fields)
+        
+        return has_required and has_optional
+
+    def merge_incomplete_pages(self, owner_pages: List[Dict], property_pages: List[Dict], filename: str) -> List[Dict]:
+        """
+        Fusionne les pages avec infos propriétaires et les pages avec infos parcelles.
+        
+        Args:
+            owner_pages: Pages avec infos propriétaires
+            property_pages: Pages avec infos parcelles
+            filename: Nom du fichier pour le logging
+            
+        Returns:
+            Liste des propriétés fusionnées
+        """
+        if not owner_pages or not property_pages:
+            # Si on n'a qu'un type, retourner tout
+            all_data = []
+            for page_info in owner_pages + property_pages:
+                all_data.extend(page_info['data'])
+            return all_data
+        
+        # Extraire les données
+        owners = []
+        properties = []
+        
+        for page_info in owner_pages:
+            owners.extend(page_info['data'])
+        
+        for page_info in property_pages:
+            properties.extend(page_info['data'])
+        
+        logger.info(f"Fusion de {len(owners)} propriétaire(s) avec {len(properties)} parcelle(s) pour {filename}")
+        
+        # Stratégie de fusion
+        merged = []
+        
+        if len(owners) == 1 and len(properties) >= 1:
+            # Un propriétaire, plusieurs parcelles
+            owner = owners[0]
+            for prop in properties:
+                merged_prop = self.merge_owner_and_property(owner, prop)
+                merged.append(merged_prop)
+        
+        elif len(owners) >= 1 and len(properties) == 1:
+            # Plusieurs propriétaires, une parcelle (rare mais possible)
+            prop = properties[0]
+            for owner in owners:
+                merged_prop = self.merge_owner_and_property(owner, prop)
+                merged.append(merged_prop)
+        
+        elif len(owners) == len(properties):
+            # Même nombre, fusion 1:1
+            for i in range(len(owners)):
+                merged_prop = self.merge_owner_and_property(owners[i], properties[i])
+                merged.append(merged_prop)
+        
+        else:
+            # Cas complexe : essayer de faire correspondre intelligemment
+            logger.warning(f"Cas complexe de fusion pour {filename}: {len(owners)} propriétaires, {len(properties)} parcelles")
+            
+            # Stratégie : chaque propriétaire avec chaque parcelle
+            for owner in owners:
+                for prop in properties:
+                    merged_prop = self.merge_owner_and_property(owner, prop)
+                    merged.append(merged_prop)
+        
+        logger.info(f"Fusion terminée: {len(merged)} propriété(s) créée(s)")
+        return merged
+
+    def merge_owner_and_property(self, owner: Dict, prop: Dict) -> Dict:
+        """
+        Fusionne les informations d'un propriétaire avec celles d'une propriété.
+        
+        Args:
+            owner: Données du propriétaire
+            prop: Données de la propriété
+            
+        Returns:
+            Propriété fusionnée
+        """
+        merged = {}
+        
+        # Priorité aux infos propriétaire pour les champs propriétaire
+        owner_fields = ['nom', 'prenom', 'adresse_proprietaire', 'post_code', 'city', 'numero_proprietaire']
+        for field in owner_fields:
+            merged[field] = owner.get(field, prop.get(field, 'N/A'))
+        
+        # Priorité aux infos propriété pour les champs propriété
+        property_fields = ['section', 'numero_plan', 'street_address', 'contenance', 'droit_reel', 'department', 'commune', 'HA', 'A', 'CA']
+        for field in property_fields:
+            merged[field] = prop.get(field, owner.get(field, 'N/A'))
+        
+        # Garder la source de page pour le debug
+        merged['_source_page'] = f"{owner.get('_source_page', '?')},{prop.get('_source_page', '?')}"
+        
+        return merged
+
+    def export_to_csv(self, all_properties: List[Dict], output_filename: str = "output.csv") -> None:
         """
         Exporte toutes les données vers un fichier CSV.
         
         Args:
-            all_owners: Liste de tous les propriétaires
+            all_properties: Liste de toutes les propriétés
             output_filename: Nom du fichier de sortie
         """
-        if not all_owners:
+        if not all_properties:
             logger.warning("Aucune donnée à exporter")
             return
         
         # Créer le DataFrame
-        df = pd.DataFrame(all_owners)
+        df = pd.DataFrame(all_properties)
         
         # Réorganiser les colonnes selon les spécifications
         columns_order = [
-            'nom', 'prenom', 'street_address', 'post_code', 'city',
+            'nom', 'prenom', 'adresse_proprietaire', 'post_code', 'city',
             'department', 'commune', 'numero_proprietaire', 'droit_reel',
-            'id_parcelle', 'fichier_source'
+            'section', 'numero_plan', 'street_address',
+            'contenance', 'HA', 'A', 'CA', 'id_parcelle', 'fichier_source'
         ]
         
         # Renommer les colonnes pour plus de clarté
         column_mapping = {
             'nom': 'Nom',
             'prenom': 'Prénom',
-            'street_address': 'Adresse',
+            'adresse_proprietaire': 'Adresse Propriétaire',
             'post_code': 'CP',
             'city': 'Ville',
             'department': 'Département',
             'commune': 'Commune',
             'numero_proprietaire': 'Numéro MAJIC',
             'droit_reel': 'Droit réel',
+            'section': 'Section',
+            'numero_plan': 'N° Plan',
+            'street_address': 'Adresse Propriété',
+            'contenance': 'Contenance',
+            'HA': 'Hectares',
+            'A': 'Ares',
+            'CA': 'Centiares',
             'id_parcelle': 'ID Parcelle',
             'fichier_source': 'Fichier source'
         }
@@ -309,7 +687,7 @@ class PDFPropertyExtractor:
         df.to_csv(output_path, index=False, encoding='utf-8-sig')
         
         logger.info(f"📊 Données exportées vers {output_path}")
-        logger.info(f"📈 Total: {len(all_owners)} propriétaire(s) dans {len(df['Fichier source'].unique())} fichier(s)")
+        logger.info(f"📈 Total: {len(all_properties)} propriété(s) dans {len(df['Fichier source'].unique())} fichier(s)")
 
     def run(self) -> None:
         """
@@ -325,14 +703,14 @@ class PDFPropertyExtractor:
             return
         
         # Traiter tous les fichiers
-        all_owners = []
+        all_properties = []
         for pdf_file in pdf_files:
-            owners = self.process_single_pdf(pdf_file)
-            all_owners.extend(owners)
+            properties = self.process_single_pdf(pdf_file)
+            all_properties.extend(properties)
         
         # Exporter les résultats
-        if all_owners:
-            self.export_to_csv(all_owners)
+        if all_properties:
+            self.export_to_csv(all_properties)
             logger.info("✅ Extraction terminée avec succès!")
         else:
             logger.warning("❌ Aucune donnée extraite")
@@ -343,15 +721,8 @@ def main():
     # Charger les variables d'environnement
     load_dotenv()
     
-    # Récupérer la clé API
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        logger.error("❌ OPENAI_API_KEY non trouvée dans les variables d'environnement")
-        logger.info("💡 Créez un fichier .env avec votre clé API OpenAI")
-        return
-    
     # Créer et lancer l'extracteur
-    extractor = PDFPropertyExtractor(api_key)
+    extractor = PDFPropertyExtractor()
     extractor.run()
 
 
