@@ -140,22 +140,22 @@ class PDFPropertyExtractor:
             
             # Prompt fonctionnel amélioré - instructions spécifiques pour cadastre français
             prompt = """
-Extrais TOUTES les propriétés avec PRECISION MAXIMALE de ce document cadastral français.
+Extrais TOUTES les propriétés de ce document cadastral français.
 
-ANALYSE MÉTHODIQUE - EXACTITUDE PRIORITAIRE :
+CHERCHE EN PRIORITÉ :
 1. DÉPARTEMENT/COMMUNE : 
    - En haut du document (titre, en-tête)
    - Dans les références cadastrales (ex: "51179 ZY 6")
    - Codes à 2+3 chiffres (ex: 51/179, 71/960)
-   - Si pas visible, déduis PRUDEMMENT du code postal des propriétaires
+   - Si pas visible, déduis du code postal des propriétaires
 
 2. SECTIONS et NUMÉROS :
    - Sections : lettres comme A, B, ZY, 244A
    - Numéros : chiffres après la section
    - Format typique : "ZY 6", "A 123", "244A 45"
 
-3. PROPRIÉTAIRES (PRIORITÉ ABSOLUE) :
-   - Noms, prénoms EXACTS dans des colonnes ou listes
+3. PROPRIÉTAIRES :
+   - Noms, prénoms dans des colonnes ou listes
    - Codes MAJIC (alphanumériques)
    - Adresses complètes avec CP/ville
 
@@ -181,10 +181,9 @@ Pour chaque propriété, retourne :
   ]
 }
 
-RÈGLES DE PRÉCISION ABSOLUE :
-- EXACTITUDE > Complétude
-- Si pas certain → "N/A" plutôt qu'erreur
+RÈGLES CRITIQUES :
 - DÉPARTEMENT/COMMUNE : Cherche PARTOUT (titre, références, contexte)
+- Si vraiment introuvable → "N/A"
 - Une entrée par propriété
 - JSON valide uniquement
 """
