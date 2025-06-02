@@ -13,7 +13,7 @@
 # Si pas encore fait, initialiser git et pousser sur GitHub
 git add .
 git commit -m "Préparation pour déploiement Streamlit"
-git push origin main
+git push origin master
 ```
 
 ### 2. Déployer sur Streamlit Community Cloud
@@ -22,8 +22,8 @@ git push origin main
 2. **Se connecter avec GitHub**
 3. **Cliquer sur "New app"**
 4. **Sélectionner :**
-   - Repository : `votre-username/pdf-extract`
-   - Branch : `main`
+   - Repository : `jawsbb/pdf-extract`
+   - Branch : `master`
    - Main file path : `streamlit_app.py`
 5. **Cliquer sur "Deploy!"**
 
@@ -49,7 +49,7 @@ Votre app sera disponible sur une URL comme :
 
 ## 🔧 Maintenance
 
-- **Mises à jour automatiques** : Chaque push sur `main` redéploie l'app
+- **Mises à jour automatiques** : Chaque push sur `master` redéploie l'app
 - **Logs** : Visibles dans l'interface Streamlit Cloud
 - **Ressources** : 1GB RAM, CPU partagé (gratuit)
 
