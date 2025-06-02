@@ -138,54 +138,34 @@ class PDFPropertyExtractor:
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt fonctionnel amélioré - instructions spécifiques pour cadastre français
+            # Prompt simple et efficace inspiré de Make.com
             prompt = """
-Extrais TOUTES les propriétés de ce document cadastral français.
+In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. Format the address as street address, city and post code. If city or postcode is not available, just leave it blank. There can be one or multiple owners. I want to extract all of them and return them in json format.
 
-CHERCHE EN PRIORITÉ :
-1. DÉPARTEMENT/COMMUNE : 
-   - En haut du document (titre, en-tête)
-   - Dans les références cadastrales (ex: "51179 ZY 6")
-   - Codes à 2+3 chiffres (ex: 51/179, 71/960)
-   - Si pas visible, déduis du code postal des propriétaires
+output example:
 
-2. SECTIONS et NUMÉROS :
-   - Sections : lettres comme A, B, ZY, 244A
-   - Numéros : chiffres après la section
-   - Format typique : "ZY 6", "A 123", "244A 45"
-
-3. PROPRIÉTAIRES :
-   - Noms, prénoms dans des colonnes ou listes
-   - Codes MAJIC (alphanumériques)
-   - Adresses complètes avec CP/ville
-
-Pour chaque propriété, retourne :
 {
   "proprietes": [
     {
-      "department": "code département 2 chiffres (OBLIGATOIRE si visible)",
-      "commune": "code commune 3 chiffres (OBLIGATOIRE si visible)", 
-      "prefixe": "préfixe section si présent",
-      "section": "section cadastrale (A, B, ZY, 244A)",
-      "numero": "numéro de parcelle (sans espaces)",
-      "contenance": "surface (enlever espaces)",
-      "droit_reel": "PP, US, NU ou équivalent",
-      "designation_parcelle": "nom lieu-dit",
-      "nom": "nom propriétaire",
-      "prenom": "prénom propriétaire",
-      "numero_majic": "numéro MAJIC",
-      "voie": "adresse propriétaire",
-      "post_code": "code postal (5 chiffres)",
-      "city": "ville propriétaire"
+      "department": "51",
+      "commune": "179", 
+      "prefixe": "",
+      "section": "ZY",
+      "numero": "0006",
+      "contenance": "230040",
+      "droit_reel": "US",
+      "designation_parcelle": "LES ROULLIERS",
+      "nom": "LAMBIN",
+      "prenom": "DIDIER JEAN GUY",
+      "numero_majic": "M8BNF6",
+      "voie": "1 RUE D AVAT",
+      "post_code": "51240",
+      "city": "COUPEVILLE"
     }
   ]
 }
 
-RÈGLES CRITIQUES :
-- DÉPARTEMENT/COMMUNE : Cherche PARTOUT (titre, références, contexte)
-- Si vraiment introuvable → "N/A"
-- Une entrée par propriété
-- JSON valide uniquement
+Extract all owners and properties. If information is not available, leave it blank or use "N/A".
 """
             
             response = self.client.chat.completions.create(
@@ -243,37 +223,32 @@ RÈGLES CRITIQUES :
         try:
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt simplifié amélioré pour la récupération
+            # Prompt simplifié pour la récupération
             simple_prompt = """
-Document cadastral français : extrais les propriétaires et parcelles.
+Extract property owners from this French cadastral document.
 
-PRIORITÉS :
-1. Cherche DÉPARTEMENT/COMMUNE en haut du document
-2. NOMS/PRÉNOMS des propriétaires
-3. SECTIONS et NUMÉROS de parcelles
-4. MAJIC et ADRESSES
-
-Format JSON :
+Return JSON format:
 {
   "proprietes": [
     {
-      "department": "dept",
-      "commune": "comm",
-      "section": "sect",
-      "numero": "num",
+      "department": "dept code",
+      "commune": "commune code",
+      "section": "section",
+      "numero": "number",
       "contenance": "surface",
       "droit_reel": "PP/US/NU",
-      "designation_parcelle": "lieu",
-      "nom": "nom",
-      "prenom": "prénom",
-      "numero_majic": "MAJIC",
-      "voie": "adresse",
-      "post_code": "CP",
-      "city": "ville"
+      "designation_parcelle": "place name",
+      "nom": "last name",
+      "prenom": "first name", 
+      "numero_majic": "MAJIC code",
+      "voie": "address",
+      "post_code": "postal code",
+      "city": "city"
     }
   ]
 }
-Si vraiment introuvable → "N/A". JSON uniquement.
+
+Extract all visible information. Use "N/A" if not available.
 """
             
             response = self.client.chat.completions.create(
