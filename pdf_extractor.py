@@ -375,30 +375,65 @@ Si vraiment introuvable → "N/A". JSON uniquement.
 
     def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
         """
-        Génère un identifiant unique pour une propriété.
+        Génère un identifiant unique de 14 caractères selon les spécifications :
+        Département (2) + Commune (3) + Section (5) + Numéro de plan (4)
         
         Args:
             department: Code département
             commune: Code commune
             section: Section cadastrale
             numero: Numéro de parcelle
-            prefixe: Préfixe optionnel
+            prefixe: Préfixe optionnel (ignoré dans cette version)
             
         Returns:
-            ID unique formaté
+            ID unique formaté sur 14 caractères (ex: 25227000ZD0005)
         """
-        # Nettoyer et formater les éléments
+        # Département : 2 chiffres
         dept = str(department).zfill(2) if department and department != "N/A" else "00"
-        comm = str(commune).zfill(3) if commune and commune != "N/A" else "000"
-        sect = str(section) if section and section != "N/A" else "A"
-        num = str(numero).zfill(4) if numero and numero != "N/A" else "0000"
-        pref = str(prefixe) if prefixe and prefixe != "N/A" else ""
         
-        # Format: DÉPARTEMENT_COMMUNE_PRÉFIXE_SECTION_NUMÉRO
-        if pref:
-            return f"{dept}_{comm}_{pref}_{sect}_{num}"
+        # Commune : 3 chiffres
+        comm = str(commune).zfill(3) if commune and commune != "N/A" else "000"
+        
+        # Section : 5 caractères avec zéros à gauche si nécessaire
+        if section and section != "N/A":
+            sect = str(section).strip()
+            # Si la section fait moins de 5 caractères, compléter avec des zéros à gauche
+            if len(sect) < 5:
+                sect = sect.zfill(5)
+            elif len(sect) > 5:
+                # Si plus de 5 caractères, tronquer à 5
+                sect = sect[:5]
         else:
-            return f"{dept}_{comm}_{sect}_{num}"
+            sect = "0000A"  # Section par défaut
+        
+        # Numéro de plan : 4 chiffres avec zéros à gauche
+        if numero and numero != "N/A":
+            num = str(numero).strip()
+            # Enlever les caractères non numériques et prendre les chiffres
+            num_clean = ''.join(filter(str.isdigit, num))
+            if num_clean:
+                num = num_clean.zfill(4)
+                # Si plus de 4 chiffres, prendre les 4 derniers
+                if len(num) > 4:
+                    num = num[-4:]
+            else:
+                num = "0001"  # Numéro par défaut si pas de chiffres
+        else:
+            num = "0001"  # Numéro par défaut
+        
+        # Format final : DDCCCSSSSSNNNNN (14 caractères)
+        unique_id = f"{dept}{comm}{sect}{num}"
+        
+        # Vérification de la longueur
+        if len(unique_id) != 14:
+            logger.warning(f"ID généré de longueur incorrecte ({len(unique_id)}): {unique_id}")
+            # Ajuster si nécessaire
+            if len(unique_id) < 14:
+                unique_id = unique_id.ljust(14, '0')
+            else:
+                unique_id = unique_id[:14]
+        
+        return unique_id
 
     def improve_extracted_data(self, properties: List[Dict], filename: str) -> List[Dict]:
         """
