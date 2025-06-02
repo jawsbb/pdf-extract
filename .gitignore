@@ -36,6 +36,9 @@ config.env
 .env.production
 *.key
 
+# Secrets Streamlit (pour le développement local uniquement)
+.streamlit/secrets.toml
+
 # Dossiers de travail
 uploads/
 outputs/

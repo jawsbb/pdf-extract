@@ -1,11 +1,11 @@
-# Dépendances principales
+# Dépendances principales pour Streamlit
 streamlit>=1.28.0
 PyMuPDF>=1.23.0
 openai>=1.0.0
 pandas>=2.0.0
 Pillow>=10.0.0
 python-dotenv>=1.0.0
-reportlab==4.0.7
+reportlab>=4.0.0
 
 # Dépendances pour l'export Excel
 openpyxl>=3.1.0
@@ -20,4 +20,6 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 plotly>=5.15.0
-pathlib2>=2.3.7 
+
+# Correction pour pathlib (pathlib2 n'est pas nécessaire en Python 3.6+)
+# pathlib2>=2.3.7  # Commenté car pathlib est inclus dans Python 3.6+ 

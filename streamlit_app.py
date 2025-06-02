@@ -33,10 +33,24 @@ except ImportError:
     st.error("Module pdf_extractor non trouvé. Assurez-vous que le fichier pdf_extractor.py est présent.")
     st.stop()
 
-# Configuration API côté serveur
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+# Configuration API côté serveur - Support Streamlit Secrets + variables d'environnement
+try:
+    # Essayer d'abord les secrets Streamlit (pour le déploiement)
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+except (KeyError, FileNotFoundError):
+    # Fallback sur les variables d'environnement (pour le développement local)
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
 if not OPENAI_API_KEY or OPENAI_API_KEY == "sk-votre-cle-api-ici":
-    st.error("Clé API OpenAI non configurée. Veuillez configurer la variable OPENAI_API_KEY dans le fichier .env")
+    st.error("""
+    🔑 **Clé API OpenAI non configurée**
+    
+    **Pour le développement local :**
+    - Créez un fichier `.env` avec `OPENAI_API_KEY=votre-clé`
+    
+    **Pour le déploiement Streamlit Cloud :**
+    - Configurez la clé dans les secrets de votre app sur share.streamlit.io
+    """)
     st.stop()
 
 os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
