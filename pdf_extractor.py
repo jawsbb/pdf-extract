@@ -138,47 +138,46 @@ class PDFPropertyExtractor:
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt détaillé pour l'extraction - NOUVEAU MODÈLE CLIENT
+            # Prompt optimisé pour documents cadastraux français
             prompt = """
-Extrais TOUTES les propriétés de ce document cadastral selon le modèle EXACT suivant.
+Tu analyses un document cadastral français. Extrais TOUTES les propriétés selon ce format :
 
-Pour chaque propriété, retourne :
 {
   "proprietes": [
     {
-      "department": "code département (2 chiffres)",
-      "commune": "code commune (3 chiffres)",
-      "prefixe": "préfixe de section si présent",
-      "section": "section cadastrale (ex: A, B, C)",
-      "numero": "numéro de parcelle",
-      "contenance": "surface totale (format : 0000000)",
-      "droit_reel": "type de droit réel (ex: PP=propriétaire, NU=usufruitier, etc)",
-      "designation_parcelle": "désignation complète de la parcelle",
-      "nom": "nom du propriétaire",
-      "prenom": "prénom du propriétaire",
-      "numero_majic": "numéro MAJIC du propriétaire",
-      "voie": "nom de la voie/rue du propriétaire",
-      "post_code": "code postal du propriétaire",
-      "city": "ville du propriétaire",
-      "id": "identifiant unique généré"
+      "department": "code département (ex: 51, 71, 25)",
+      "commune": "code commune (ex: 179, 024)",
+      "prefixe": "préfixe section (ex: 000, sinon N/A)",
+      "section": "section (ex: ZY, A, B, 244A)",
+      "numero": "numéro parcelle (ex: 6, 0006, 333)",
+      "contenance": "surface (ex: 0002340, 0003660)",
+      "droit_reel": "type droit (PP=propriétaire, US=usufruitier, NU=nu-propriétaire)",
+      "designation_parcelle": "nom/lieu de la parcelle (ex: LES ROULLIERS)",
+      "nom": "nom propriétaire (ex: LAMBIN)",
+      "prenom": "prénom propriétaire (ex: DIDIER JEAN GUY)",
+      "numero_majic": "numéro MAJIC (ex: M8BNF6, MB43HC)",
+      "voie": "adresse propriétaire (ex: 1 RUE D AVAT)",
+      "post_code": "code postal (ex: 51240)",
+      "city": "ville propriétaire (ex: COUPEVILLE)",
+      "id": "ID auto-généré"
     }
   ]
 }
 
-INSTRUCTIONS SPÉCIFIQUES :
-- DROIT RÉEL : Cherche PP (propriétaire), NU (nu-propriétaire), US (usufruitier), etc.
-- PRÉFIXE : Code avant la section (ex: 000 dans 000A0123)
-- SECTION : Lettre de section (A, B, C, etc.)
-- NUMÉRO : Numéro de parcelle après la section
-- DESIGNATION : Description complète du terrain/parcelle
-- VOIE : Adresse/rue où habite le propriétaire (différent de la parcelle)
-- ID : Créer un ID unique basé sur département+commune+section+numéro
+INSTRUCTIONS EXTRACTION :
+1. DÉPARTEMENT/COMMUNE : Cherche en haut du document ou dans les références cadastrales
+2. SECTION : Lettre(s) + chiffres (ex: ZY, A, 244A, AB)
+3. NUMÉRO : Chiffres après la section dans la référence parcellaire
+4. DROIT RÉEL : PP/US/NU (cherche bien cette info)
+5. CONTENANCE : Surface en m² ou format 7 chiffres
+6. DESIGNATION : Nom du lieu-dit ou de la parcelle
+7. MAJIC : Code alphanumérique unique par propriétaire
 
 RÈGLES :
-- Une ligne par propriété (même propriétaire = plusieurs lignes si plusieurs propriétés)
-- Si information manquante → "N/A"
-- JSON valide uniquement
-- Pas de texte explicatif
+- Si une info est introuvable → "N/A"
+- Une ligne par couple propriétaire/parcelle
+- Même propriétaire sur plusieurs parcelles = plusieurs lignes
+- JSON uniquement, pas d'explication
 """
             
             response = self.client.chat.completions.create(
@@ -238,29 +237,28 @@ RÈGLES :
             
             # Prompt simplifié pour la récupération
             simple_prompt = """
-Extrais les propriétés de ce document. Format JSON simple :
+Document cadastral : extrais propriétaires et parcelles.
+Format JSON :
 {
   "proprietes": [
     {
-      "department": "département",
-      "commune": "commune",
-      "prefixe": "préfixe",
-      "section": "section",
-      "numero": "numéro",
-      "contenance": "contenance",
-      "droit_reel": "droit réel",
-      "designation_parcelle": "désignation",
+      "department": "dept",
+      "commune": "comm",
+      "section": "sect",
+      "numero": "num",
+      "contenance": "surface",
+      "droit_reel": "PP/US/NU",
+      "designation_parcelle": "lieu",
       "nom": "nom",
       "prenom": "prénom",
       "numero_majic": "MAJIC",
-      "voie": "voie",
+      "voie": "adresse",
       "post_code": "CP",
-      "city": "ville",
-      "id": "ID"
+      "city": "ville"
     }
   ]
 }
-JSON uniquement, pas de texte.
+Si info manquante → "N/A". JSON uniquement.
 """
             
             response = self.client.chat.completions.create(
@@ -298,7 +296,7 @@ JSON uniquement, pas de texte.
                 for prop in result["proprietes"]:
                     for field in ["department", "commune", "prefixe", "section", "numero", "contenance", 
                                 "droit_reel", "designation_parcelle", "nom", "prenom", "numero_majic", 
-                                "voie", "post_code", "city", "id"]:
+                                "voie", "post_code", "city"]:
                         if field not in prop:
                             prop[field] = "N/A"
                 
@@ -387,6 +385,69 @@ JSON uniquement, pas de texte.
         else:
             return f"{dept}_{comm}_{sect}_{num}"
 
+    def clean_and_validate_property(self, prop: Dict) -> Dict:
+        """
+        Nettoie et valide une propriété extraite.
+        
+        Args:
+            prop: Propriété brute extraite
+            
+        Returns:
+            Propriété nettoyée et validée
+        """
+        # Nettoyer les champs
+        cleaned = {}
+        
+        # Département : doit être numérique 2 chiffres
+        dept = str(prop.get('department', 'N/A')).strip()
+        if dept.isdigit() and 1 <= int(dept) <= 95:
+            cleaned['department'] = dept.zfill(2)
+        else:
+            cleaned['department'] = 'N/A'
+        
+        # Commune : doit être numérique 3 chiffres
+        comm = str(prop.get('commune', 'N/A')).strip()
+        if comm.isdigit() and len(comm) <= 3:
+            cleaned['commune'] = comm.zfill(3)
+        else:
+            cleaned['commune'] = 'N/A'
+        
+        # Section : lettres et chiffres
+        section = str(prop.get('section', 'N/A')).strip().upper()
+        cleaned['section'] = section if section != 'N/A' and section else 'N/A'
+        
+        # Numéro : doit être numérique
+        numero = str(prop.get('numero', 'N/A')).strip()
+        # Enlever les zéros en trop au début pour les numéros
+        if numero.isdigit():
+            cleaned['numero'] = numero.zfill(4)  # Format standard 4 chiffres
+        else:
+            cleaned['numero'] = 'N/A'
+        
+        # Droit réel : normaliser
+        droit = str(prop.get('droit_reel', 'N/A')).strip().upper()
+        if 'PROPRIET' in droit or droit == 'PP':
+            cleaned['droit_reel'] = 'PP'
+        elif 'USUFRUITIER' in droit or droit == 'US':
+            cleaned['droit_reel'] = 'US'
+        elif 'NU-PROPRIET' in droit or droit == 'NU':
+            cleaned['droit_reel'] = 'NU'
+        else:
+            cleaned['droit_reel'] = droit if droit != 'N/A' else 'N/A'
+        
+        # Copier les autres champs en nettoyant
+        for field in ['prefixe', 'contenance', 'designation_parcelle', 'nom', 'prenom', 
+                     'numero_majic', 'voie', 'post_code', 'city']:
+            value = str(prop.get(field, 'N/A')).strip()
+            cleaned[field] = value if value and value != 'None' else 'N/A'
+        
+        # Validation finale : ignorer les propriétés trop incomplètes
+        required_fields = ['nom', 'prenom', 'section']
+        if all(cleaned.get(field) == 'N/A' for field in required_fields):
+            return None  # Propriété trop incomplète
+        
+        return cleaned
+
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -431,25 +492,25 @@ JSON uniquement, pas de texte.
         # Traiter chaque propriété combinée
         processed_properties = []
         for property_data in combined_properties:
-            # Générer l'ID unique avec le nouveau modèle
+            # Nettoyer et valider d'abord
+            cleaned_property = self.clean_and_validate_property(property_data)
+            if not cleaned_property:
+                continue  # Ignorer les propriétés trop incomplètes
+            
+            # Générer l'ID unique avec les données nettoyées
             unique_id = self.generate_unique_id(
-                department=property_data.get('department', '00'),
-                commune=property_data.get('commune', '000'),
-                section=property_data.get('section', 'A'),
-                numero=property_data.get('numero', '0000'),
-                prefixe=property_data.get('prefixe', '')
+                department=cleaned_property.get('department', '00'),
+                commune=cleaned_property.get('commune', '000'),
+                section=cleaned_property.get('section', 'A'),
+                numero=cleaned_property.get('numero', '0000'),
+                prefixe=cleaned_property.get('prefixe', '')
             )
             
-            # Ajouter l'ID unique
-            property_data['id'] = unique_id
-            property_data['fichier_source'] = pdf_path.name
+            # Ajouter l'ID unique et le fichier source
+            cleaned_property['id'] = unique_id
+            cleaned_property['fichier_source'] = pdf_path.name
             
-            # Nettoyer les champs techniques
-            property_data.pop('_source_page', None)
-            property_data.pop('_is_owner_info', None)
-            property_data.pop('_is_property_info', None)
-            
-            processed_properties.append(property_data)
+            processed_properties.append(cleaned_property)
         
         logger.info(f"✅ {pdf_path.name} traité avec succès - {len(processed_properties)} propriété(s)")
         return processed_properties
