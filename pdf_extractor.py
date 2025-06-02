@@ -567,8 +567,13 @@ Si vraiment introuvable → "N/A". JSON uniquement.
         # Analyser les patterns CONFIRMÉS uniquement
         confirmed_depts = [p.get('department') for p in properties 
                           if p.get('department') and p.get('department') != 'N/A']
+        confirmed_communes = [p.get('commune') for p in properties 
+                             if p.get('commune') and p.get('commune') != 'N/A']
         
         best_dept = None
+        best_commune = None
+        
+        # Récupération département
         if confirmed_depts:
             # Seulement si >60% des propriétés ont le même département
             dept_counts = {}
@@ -581,19 +586,30 @@ Si vraiment introuvable → "N/A". JSON uniquement.
                     best_dept = most_common_dept
                     logger.info(f"✅ Département dominant détecté: {best_dept} ({count}/{total_props})")
         
-        # Récupération PRUDENTE depuis codes postaux (seulement si pas de département trouvé)
-        if not best_dept:
+        # Récupération commune
+        if confirmed_communes:
+            commune_counts = {}
+            for c in confirmed_communes:
+                commune_counts[c] = commune_counts.get(c, 0) + 1
+            if commune_counts:
+                most_common_commune, count = max(commune_counts.items(), key=lambda x: x[1])
+                if count >= 2:  # Au moins 2 occurrences
+                    best_commune = most_common_commune
+                    logger.info(f"✅ Commune dominante détectée: {best_commune} ({count} occurrences)")
+        
+        # Récupération PRUDENTE depuis codes postaux (seulement si pas de département/commune trouvé)
+        if not best_dept or not best_commune:
             postcodes = [p.get('post_code') for p in properties 
                         if p.get('post_code') and p.get('post_code') != 'N/A']
             if len(postcodes) >= 2:
-                pc_depts = {}
+                pc_info = {}
                 for pc in postcodes:
                     if len(str(pc)) >= 2 and str(pc)[:2].isdigit():
                         dept = str(pc)[:2]
-                        pc_depts[dept] = pc_depts.get(dept, 0) + 1
+                        pc_info[dept] = pc_info.get(dept, 0) + 1
                 
-                if pc_depts:
-                    most_common_pc_dept, count = max(pc_depts.items(), key=lambda x: x[1])
+                if pc_info and not best_dept:
+                    most_common_pc_dept, count = max(pc_info.items(), key=lambda x: x[1])
                     if count >= 2:  # Au moins 2 occurrences identiques
                         best_dept = most_common_pc_dept
                         logger.info(f"✅ Département déduit PRUDEMMENT des CP: {best_dept} ({count} occurrences)")
@@ -601,20 +617,29 @@ Si vraiment introuvable → "N/A". JSON uniquement.
         # Application conservatrice
         recovered = []
         dept_applied = 0
+        commune_applied = 0
         
         for prop in properties:
             new_prop = prop.copy()
             
             # Application SEULEMENT si très confiant ET c'est un vrai propriétaire
-            if (new_prop.get('department') == 'N/A' and best_dept and 
-                new_prop.get('nom') != 'N/A' and new_prop.get('prenom') != 'N/A'):
-                new_prop['department'] = best_dept
-                dept_applied += 1
+            if new_prop.get('nom') != 'N/A' and new_prop.get('prenom') != 'N/A':
+                
+                # Appliquer département
+                if new_prop.get('department') == 'N/A' and best_dept:
+                    new_prop['department'] = best_dept
+                    dept_applied += 1
+                
+                # Appliquer commune (seulement si on a déjà un département valide)
+                if (new_prop.get('commune') == 'N/A' and best_commune and 
+                    new_prop.get('department') != 'N/A'):
+                    new_prop['commune'] = best_commune
+                    commune_applied += 1
             
             recovered.append(new_prop)
         
-        if dept_applied > 0:
-            logger.info(f"✅ {dept_applied} département(s) appliqué(s) de façon conservatrice")
+        if dept_applied > 0 or commune_applied > 0:
+            logger.info(f"✅ Appliqué: {dept_applied} département(s), {commune_applied} commune(s)")
         else:
             logger.info(f"⚠️  Aucune récupération appliquée - précision préservée")
         
