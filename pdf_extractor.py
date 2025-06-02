@@ -138,37 +138,49 @@ class PDFPropertyExtractor:
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt fonctionnel restauré - adapté aux spécifications client
+            # Prompt fonctionnel amélioré - instructions spécifiques pour cadastre français
             prompt = """
-Extrais TOUTES les propriétés de ce document cadastral.
+Extrais TOUTES les propriétés de ce document cadastral français.
+
+CHERCHE CES INFORMATIONS DANS L'ORDRE :
+1. DÉPARTEMENT/COMMUNE : En haut du document, dans les en-têtes, ou avec les références cadastrales
+2. SECTION : Lettres comme A, B, ZY, 244A (parfois après "Section ")
+3. NUMÉRO : Chiffres après la section dans les références parcellaires
+4. DROIT RÉEL : Cherche PP (propriétaire), US (usufruitier), NU (nu-propriétaire) - souvent dans des colonnes
+5. CONTENANCE : Surface en chiffres (format 0000000 ou "XX HA XX A")
+6. DESIGNATION : Nom du lieu-dit (ex: "LES ROULLIERS", "Terres", "Futaies")
+7. PROPRIÉTAIRE : Nom et prénom (souvent en colonnes distinctes)
+8. MAJIC : Code alphanumérique du propriétaire (ex: M8BNF6, MB43HC)
+9. ADRESSE : Rue, code postal, ville du propriétaire
 
 Pour chaque propriété, retourne :
 {
   "proprietes": [
     {
       "department": "code département 2 chiffres",
-      "commune": "code commune 3 chiffres",
+      "commune": "code commune 3 chiffres", 
       "prefixe": "préfixe section si présent",
-      "section": "section cadastrale (ex: A, B, ZY, 244A)",
+      "section": "section cadastrale (A, B, ZY, 244A)",
       "numero": "numéro de parcelle",
-      "contenance": "surface (7 chiffres si possible)",
-      "droit_reel": "type de droit (PP, US, NU ou équivalent)",
-      "designation_parcelle": "nom lieu-dit ou localisation propriété",
+      "contenance": "surface (chiffres ou format HA/A)",
+      "droit_reel": "PP, US, NU ou équivalent",
+      "designation_parcelle": "nom lieu-dit",
       "nom": "nom propriétaire",
-      "prenom": "prénom propriétaire", 
-      "numero_majic": "numéro MAJIC propriétaire",
-      "voie": "adresse domicile propriétaire",
-      "post_code": "code postal propriétaire",
+      "prenom": "prénom propriétaire",
+      "numero_majic": "numéro MAJIC",
+      "voie": "adresse propriétaire",
+      "post_code": "code postal",
       "city": "ville propriétaire"
     }
   ]
 }
 
-RÈGLES :
+RÈGLES IMPORTANTES :
+- Si département/commune pas visible, cherche dans les références cadastrales ou titres
 - Une entrée par propriété (même propriétaire = plusieurs entrées si plusieurs propriétés)
-- Si info manquante → "N/A"
+- Si info vraiment introuvable → "N/A"
+- Priorité aux informations les plus complètes
 - JSON valide uniquement
-- Pas de texte en dehors du JSON
 """
             
             response = self.client.chat.completions.create(
@@ -226,9 +238,16 @@ RÈGLES :
         try:
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt simplifié pour la récupération
+            # Prompt simplifié amélioré pour la récupération
             simple_prompt = """
-Document cadastral : extrais propriétaires et parcelles.
+Document cadastral français : extrais les propriétaires et parcelles.
+
+PRIORITÉS :
+1. Cherche DÉPARTEMENT/COMMUNE en haut du document
+2. NOMS/PRÉNOMS des propriétaires
+3. SECTIONS et NUMÉROS de parcelles
+4. MAJIC et ADRESSES
+
 Format JSON :
 {
   "proprietes": [
@@ -249,7 +268,7 @@ Format JSON :
     }
   ]
 }
-Si info manquante → "N/A". JSON uniquement.
+Si vraiment introuvable → "N/A". JSON uniquement.
 """
             
             response = self.client.chat.completions.create(
@@ -376,6 +395,82 @@ Si info manquante → "N/A". JSON uniquement.
         else:
             return f"{dept}_{comm}_{sect}_{num}"
 
+    def improve_extracted_data(self, properties: List[Dict], filename: str) -> List[Dict]:
+        """
+        Améliore intelligemment les données extraites en comblant les manques.
+        
+        Args:
+            properties: Liste des propriétés extraites
+            filename: Nom du fichier pour le contexte
+            
+        Returns:
+            Liste des propriétés améliorées
+        """
+        if not properties:
+            return []
+        
+        improved = []
+        
+        # Analyser les données pour trouver des patterns communs
+        common_dept = None
+        common_commune = None
+        
+        # Chercher les valeurs les plus fréquentes non-N/A
+        depts = [p.get('department') for p in properties if p.get('department') and p.get('department') != 'N/A']
+        communes = [p.get('commune') for p in properties if p.get('commune') and p.get('commune') != 'N/A']
+        
+        if depts:
+            common_dept = max(set(depts), key=depts.count)
+        if communes:
+            common_commune = max(set(communes), key=communes.count)
+        
+        logger.info(f"Amélioration pour {filename} - Dept commun: {common_dept}, Commune commune: {common_commune}")
+        
+        for prop in properties:
+            improved_prop = prop.copy()
+            
+            # Améliorer département/commune si manquants
+            if improved_prop.get('department') == 'N/A' and common_dept:
+                improved_prop['department'] = common_dept
+                
+            if improved_prop.get('commune') == 'N/A' and common_commune:
+                improved_prop['commune'] = common_commune
+            
+            # Nettoyer la contenance (enlever les espaces, normaliser)
+            contenance = improved_prop.get('contenance', 'N/A')
+            if contenance and contenance != 'N/A':
+                # Convertir "23 HA 40 A" en format numérique
+                if 'HA' in str(contenance):
+                    try:
+                        parts = str(contenance).upper().replace('A', '').replace('HA', '').strip().split()
+                        if len(parts) >= 2:
+                            ha = int(parts[0]) if parts[0].isdigit() else 0
+                            a = int(parts[1]) if parts[1].isdigit() else 0
+                            # Format: HHAAAA (2 chiffres HA + 4 chiffres A)
+                            improved_prop['contenance'] = f"{ha:02d}{a:04d}0"
+                    except:
+                        pass
+            
+            # Normaliser les droits réels
+            droit = str(improved_prop.get('droit_reel', 'N/A')).upper()
+            if 'PROPRIET' in droit and droit != 'PP':
+                improved_prop['droit_reel'] = 'PP'
+            elif 'USUFRUIT' in droit and droit != 'US':
+                improved_prop['droit_reel'] = 'US'
+            elif 'NU-PROPRIET' in droit or 'NUE-PROPRIET' in droit:
+                improved_prop['droit_reel'] = 'NU'
+            
+            # Ignorer les propriétés complètement vides (que des N/A)
+            essential_fields = ['nom', 'prenom', 'section', 'numero']
+            if all(improved_prop.get(field) in ['N/A', None, ''] for field in essential_fields):
+                logger.warning(f"Propriété ignorée car trop incomplète dans {filename}")
+                continue
+            
+            improved.append(improved_prop)
+        
+        logger.info(f"Amélioration terminée: {len(properties)} → {len(improved)} propriété(s) pour {filename}")
+        return improved
+
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -417,9 +512,12 @@ Si info manquante → "N/A". JSON uniquement.
         # Combiner intelligemment les données des pages
         combined_properties = self.combine_multi_page_data(all_page_data, pdf_path.name)
         
+        # Améliorer les données extraites
+        improved_properties = self.improve_extracted_data(combined_properties, pdf_path.name)
+        
         # Traiter chaque propriété combinée
         processed_properties = []
-        for property_data in combined_properties:
+        for property_data in improved_properties:
             # Générer l'ID unique avec les nouvelles colonnes
             unique_id = self.generate_unique_id(
                 department=property_data.get('department', '00'),
