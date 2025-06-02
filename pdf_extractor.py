@@ -100,7 +100,7 @@ class PDFPropertyExtractor:
                     page = doc[page_num]
                     
                     # Convertir chaque page en image avec une résolution élevée
-                    mat = fitz.Matrix(3.0, 3.0)  # Augmenté de 2.0 à 3.0 pour une meilleure qualité
+                    mat = fitz.Matrix(4.0, 4.0)  # Augmenté de 3.0 à 4.0 pour une qualité maximale
                     pix = page.get_pixmap(matrix=mat)
                     
                     # Convertir en PNG
@@ -140,10 +140,18 @@ class PDFPropertyExtractor:
             
             # Prompt simple et efficace inspiré de Make.com
             prompt = """
-In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. Format the address as street address, city and post code. If city or postcode is not available, just leave it blank. There can be one or multiple owners. I want to extract all of them and return them in json format.
+IMPORTANT: You are an expert French cadastral document analyzer. Your job is to extract ALL visible information with maximum precision. Avoid "N/A" whenever possible by looking carefully at ALL parts of the document.
 
-output example:
+In this French cadastral document, extract information for ALL property owners including: nom, prenom, adresse, droit reel, numero proprietaire, department, commune, section, numero, contenance, designation parcelle.
 
+SEARCH STRATEGY:
+1. Look at document headers for department/commune codes
+2. Look for reference numbers like "51179 ZY 6" (department 51, commune 179, section ZY, number 6)  
+3. Scan entire document for owner names and addresses
+4. Check for MAJIC codes (alphanumeric like M8BNF6)
+5. If you see partial information, include it - don't use N/A
+
+OUTPUT FORMAT (use this exact structure):
 {
   "proprietes": [
     {
@@ -165,7 +173,7 @@ output example:
   ]
 }
 
-Extract all owners and properties. If information is not available, leave it blank or use "N/A".
+CRITICAL: Extract ALL visible owners and properties. Look very carefully. Use empty string "" instead of N/A when information is truly missing. Be thorough - this document contains valuable data that must be extracted accurately.
 """
             
             response = self.client.chat.completions.create(
@@ -185,8 +193,8 @@ Extract all owners and properties. If information is not available, leave it bla
                         ]
                     }
                 ],
-                max_tokens=2500,
-                temperature=0.1
+                max_tokens=3000,
+                temperature=0.0
             )
             
             # Parser la réponse JSON
@@ -620,6 +628,187 @@ Extract all visible information. Use "N/A" if not available.
         
         return recovered
 
+    def multi_pass_extraction(self, properties: List[Dict], image_data: bytes, filename: str) -> List[Dict]:
+        """
+        Extraction multi-passes pour récupérer les N/A restants.
+        Fait plusieurs tentatives avec des prompts différents.
+        """
+        if not properties:
+            return []
+        
+        # Compter les N/A initiaux
+        initial_na_count = sum(1 for prop in properties for field, value in prop.items() 
+                              if value in ['N/A', '', None])
+        
+        if initial_na_count == 0:
+            logger.info(f"✅ Aucun N/A détecté pour {filename} - extraction complète")
+            return properties
+            
+        logger.info(f"🔄 Multi-pass extraction pour {filename} - {initial_na_count} N/A à récupérer")
+        
+        # Pass 2: Focus sur les départements/communes manquants
+        if any(prop.get('department') in ['N/A', '', None] or prop.get('commune') in ['N/A', '', None] 
+               for prop in properties):
+            
+            try:
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                location_prompt = """
+Look at this French cadastral document and find ONLY the department and commune codes.
+
+Look for:
+- Header information with department/commune numbers
+- Reference codes like "51179" (department 51, commune 179)
+- Municipality names that could indicate location
+
+Return ONLY the codes in this format:
+{
+  "department": "XX",
+  "commune": "XXX"
+}
+
+Be very thorough. These codes are usually at the top of the document.
+"""
+                
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": location_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}",
+                                        "detail": "high"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=500,
+                    temperature=0.0
+                )
+                
+                response_text = response.choices[0].message.content.strip()
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].strip()
+                
+                location_data = json.loads(response_text)
+                found_dept = location_data.get('department')
+                found_commune = location_data.get('commune')
+                
+                # Appliquer aux propriétés manquantes
+                applied_count = 0
+                for prop in properties:
+                    if prop.get('department') in ['N/A', '', None] and found_dept:
+                        prop['department'] = found_dept
+                        applied_count += 1
+                    if prop.get('commune') in ['N/A', '', None] and found_commune:
+                        prop['commune'] = found_commune
+                        applied_count += 1
+                
+                if applied_count > 0:
+                    logger.info(f"✅ Pass 2: Récupéré {applied_count} département/commune pour {filename}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Pass 2 échoué pour {filename}: {e}")
+        
+        # Pass 3: Focus sur les propriétaires manquants
+        missing_owners = [i for i, prop in enumerate(properties) 
+                         if prop.get('nom') in ['N/A', '', None] or prop.get('prenom') in ['N/A', '', None]]
+        
+        if missing_owners:
+            try:
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                owner_prompt = """
+Look at this French cadastral document and find ALL property owner names.
+
+Focus on finding:
+- Last names (NOM) and first names (PRENOM)
+- MAJIC codes (like M8BNF6, MB43HC)
+- Addresses of owners
+- Any owner information in tables or lists
+
+Return ALL owners you can find:
+{
+  "owners": [
+    {
+      "nom": "LASTNAME",
+      "prenom": "FIRSTNAME", 
+      "numero_majic": "MAJIC_CODE",
+      "voie": "ADDRESS",
+      "post_code": "POSTAL",
+      "city": "CITY"
+    }
+  ]
+}
+
+Be extremely thorough. Look everywhere for owner information.
+"""
+                
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": owner_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}",
+                                        "detail": "high"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=2000,
+                    temperature=0.0
+                )
+                
+                response_text = response.choices[0].message.content.strip()
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].strip()
+                
+                owner_data = json.loads(response_text)
+                found_owners = owner_data.get('owners', [])
+                
+                # Fusionner avec les propriétés existantes
+                applied_count = 0
+                for i, missing_idx in enumerate(missing_owners):
+                    if i < len(found_owners):
+                        owner = found_owners[i]
+                        prop = properties[missing_idx]
+                        
+                        for field in ['nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city']:
+                            if prop.get(field) in ['N/A', '', None] and owner.get(field):
+                                prop[field] = owner[field]
+                                applied_count += 1
+                
+                if applied_count > 0:
+                    logger.info(f"✅ Pass 3: Récupéré {applied_count} infos propriétaires pour {filename}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Pass 3 échoué pour {filename}: {e}")
+        
+        # Bilan final
+        final_na_count = sum(1 for prop in properties for field, value in prop.items() 
+                            if value in ['N/A', '', None])
+        recovered = initial_na_count - final_na_count
+        
+        if recovered > 0:
+            logger.info(f"🎯 Multi-pass terminé pour {filename}: {recovered} N/A récupérés sur {initial_na_count}")
+        else:
+            logger.info(f"⚠️ Multi-pass terminé pour {filename}: aucun N/A supplémentaire récupéré")
+        
+        return properties
+
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -667,9 +856,15 @@ Extract all visible information. Use "N/A" if not available.
         # Récupérer la récupération conservatrice
         recovered_properties = self.conservative_na_recovery(improved_properties, pdf_path.name)
         
+        # Récupérer les N/A restants avec extraction multi-passes
+        if images:
+            final_properties = self.multi_pass_extraction(recovered_properties, images[0], pdf_path.name)
+        else:
+            final_properties = recovered_properties
+        
         # Traiter chaque propriété combinée
         processed_properties = []
-        for property_data in recovered_properties:
+        for property_data in final_properties:
             # Générer l'ID unique avec les nouvelles colonnes
             unique_id = self.generate_unique_id(
                 department=property_data.get('department', '00'),
