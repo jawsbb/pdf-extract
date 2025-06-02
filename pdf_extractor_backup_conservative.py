@@ -140,22 +140,22 @@ class PDFPropertyExtractor:
             
             # Prompt fonctionnel amélioré - instructions spécifiques pour cadastre français
             prompt = """
-Extrais TOUTES les propriétés avec PRECISION MAXIMALE de ce document cadastral français.
+Extrais TOUTES les propriétés de ce document cadastral français.
 
-ANALYSE MÉTHODIQUE - EXACTITUDE PRIORITAIRE :
+CHERCHE EN PRIORITÉ :
 1. DÉPARTEMENT/COMMUNE : 
    - En haut du document (titre, en-tête)
    - Dans les références cadastrales (ex: "51179 ZY 6")
    - Codes à 2+3 chiffres (ex: 51/179, 71/960)
-   - Si pas visible, déduis PRUDEMMENT du code postal des propriétaires
+   - Si pas visible, déduis du code postal des propriétaires
 
 2. SECTIONS et NUMÉROS :
    - Sections : lettres comme A, B, ZY, 244A
    - Numéros : chiffres après la section
    - Format typique : "ZY 6", "A 123", "244A 45"
 
-3. PROPRIÉTAIRES (PRIORITÉ ABSOLUE) :
-   - Noms, prénoms EXACTS dans des colonnes ou listes
+3. PROPRIÉTAIRES :
+   - Noms, prénoms dans des colonnes ou listes
    - Codes MAJIC (alphanumériques)
    - Adresses complètes avec CP/ville
 
@@ -181,10 +181,9 @@ Pour chaque propriété, retourne :
   ]
 }
 
-RÈGLES DE PRÉCISION ABSOLUE :
-- EXACTITUDE > Complétude
-- Si pas certain → "N/A" plutôt qu'erreur
+RÈGLES CRITIQUES :
 - DÉPARTEMENT/COMMUNE : Cherche PARTOUT (titre, références, contexte)
+- Si vraiment introuvable → "N/A"
 - Une entrée par propriété
 - JSON valide uniquement
 """
@@ -555,72 +554,6 @@ Si vraiment introuvable → "N/A". JSON uniquement.
         logger.info(f"Amélioration terminée: {len(properties)} → {len(improved)} propriété(s) pour {filename}")
         return improved
 
-    def conservative_na_recovery(self, properties: List[Dict], filename: str) -> List[Dict]:
-        """
-        Récupération conservatrice des N/A - SEULEMENT si très confiant.
-        Préserve la précision en étant très prudent.
-        """
-        if not properties:
-            return []
-        
-        logger.info(f"🔍 Récupération conservatrice pour {filename}")
-        
-        # Analyser les patterns CONFIRMÉS uniquement
-        confirmed_depts = [p.get('department') for p in properties 
-                          if p.get('department') and p.get('department') != 'N/A']
-        
-        best_dept = None
-        if confirmed_depts:
-            # Seulement si >60% des propriétés ont le même département
-            dept_counts = {}
-            for d in confirmed_depts:
-                dept_counts[d] = dept_counts.get(d, 0) + 1
-            total_props = len([p for p in properties if p.get('nom') != 'N/A'])
-            if total_props > 0:
-                most_common_dept, count = max(dept_counts.items(), key=lambda x: x[1])
-                if count > total_props * 0.6:  # 60% minimum
-                    best_dept = most_common_dept
-                    logger.info(f"✅ Département dominant détecté: {best_dept} ({count}/{total_props})")
-        
-        # Récupération PRUDENTE depuis codes postaux (seulement si pas de département trouvé)
-        if not best_dept:
-            postcodes = [p.get('post_code') for p in properties 
-                        if p.get('post_code') and p.get('post_code') != 'N/A']
-            if len(postcodes) >= 2:
-                pc_depts = {}
-                for pc in postcodes:
-                    if len(str(pc)) >= 2 and str(pc)[:2].isdigit():
-                        dept = str(pc)[:2]
-                        pc_depts[dept] = pc_depts.get(dept, 0) + 1
-                
-                if pc_depts:
-                    most_common_pc_dept, count = max(pc_depts.items(), key=lambda x: x[1])
-                    if count >= 2:  # Au moins 2 occurrences identiques
-                        best_dept = most_common_pc_dept
-                        logger.info(f"✅ Département déduit PRUDEMMENT des CP: {best_dept} ({count} occurrences)")
-        
-        # Application conservatrice
-        recovered = []
-        dept_applied = 0
-        
-        for prop in properties:
-            new_prop = prop.copy()
-            
-            # Application SEULEMENT si très confiant ET c'est un vrai propriétaire
-            if (new_prop.get('department') == 'N/A' and best_dept and 
-                new_prop.get('nom') != 'N/A' and new_prop.get('prenom') != 'N/A'):
-                new_prop['department'] = best_dept
-                dept_applied += 1
-            
-            recovered.append(new_prop)
-        
-        if dept_applied > 0:
-            logger.info(f"✅ {dept_applied} département(s) appliqué(s) de façon conservatrice")
-        else:
-            logger.info(f"⚠️  Aucune récupération appliquée - précision préservée")
-        
-        return recovered
-
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -665,12 +598,9 @@ Si vraiment introuvable → "N/A". JSON uniquement.
         # Améliorer les données extraites
         improved_properties = self.improve_extracted_data(combined_properties, pdf_path.name)
         
-        # Récupérer la récupération conservatrice
-        recovered_properties = self.conservative_na_recovery(improved_properties, pdf_path.name)
-        
         # Traiter chaque propriété combinée
         processed_properties = []
-        for property_data in recovered_properties:
+        for property_data in improved_properties:
             # Générer l'ID unique avec les nouvelles colonnes
             unique_id = self.generate_unique_id(
                 department=property_data.get('department', '00'),
