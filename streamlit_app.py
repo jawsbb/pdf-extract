@@ -729,21 +729,23 @@ def display_results(results):
     # Préparation du DataFrame
     df = pd.DataFrame(results)
     
-    # Mapping des colonnes pour l'affichage
+    # Mapping des colonnes pour l'affichage - NOUVEAU MODÈLE CLIENT
     column_mapping = {
-        'nom': 'Nom',
-        'prenom': 'Prénom', 
-        'adresse_proprietaire': 'Adresse Propriétaire',
-        'city': 'Ville',
-        'post_code': 'Code Postal',
-        'droit_reel': 'Droit réel',
+        'department': 'Département',
+        'commune': 'Commune',
+        'prefixe': 'Préfixe',
         'section': 'Section',
-        'numero_plan': 'N° Plan',
-        'street_address': 'Adresse Propriété',
+        'numero': 'Numéro',
         'contenance': 'Contenance',
-        'HA': 'Hectares',
-        'A': 'Ares',
-        'CA': 'Centiares',
+        'droit_reel': 'Droit réel',
+        'designation_parcelle': 'Designation Parcelle',
+        'nom': 'Nom Propri',
+        'prenom': 'Prénom Propri',
+        'numero_majic': 'N°MAJIC',
+        'voie': 'Voie',
+        'post_code': 'CP',
+        'city': 'Ville',
+        'id': 'id',
         'fichier_source': 'Fichier'
     }
     

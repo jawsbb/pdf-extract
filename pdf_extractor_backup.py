@@ -138,47 +138,39 @@ class PDFPropertyExtractor:
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt détaillé pour l'extraction - NOUVEAU MODÈLE CLIENT
+            # Prompt détaillé pour l'extraction
             prompt = """
-Extrais TOUTES les propriétés de ce document cadastral selon le modèle EXACT suivant.
+Extrais TOUTES les propriétés de ce document cadastral.
 
 Pour chaque propriété, retourne :
 {
   "proprietes": [
     {
-      "department": "code département (2 chiffres)",
-      "commune": "code commune (3 chiffres)",
-      "prefixe": "préfixe de section si présent",
-      "section": "section cadastrale (ex: A, B, C)",
-      "numero": "numéro de parcelle",
-      "contenance": "surface totale (format : 0000000)",
-      "droit_reel": "type de droit réel (ex: PP=propriétaire, NU=usufruitier, etc)",
-      "designation_parcelle": "désignation complète de la parcelle",
-      "nom": "nom du propriétaire",
-      "prenom": "prénom du propriétaire",
-      "numero_majic": "numéro MAJIC du propriétaire",
-      "voie": "nom de la voie/rue du propriétaire",
-      "post_code": "code postal du propriétaire",
-      "city": "ville du propriétaire",
-      "id": "identifiant unique généré"
+      "nom": "nom propriétaire",
+      "prenom": "prénom", 
+      "adresse_proprietaire": "adresse domicile propriétaire",
+      "post_code": "code postal",
+      "city": "ville",
+      "numero_proprietaire": "numéro MAJIC",
+      "department": "code département 2 chiffres",
+      "commune": "code commune 3 chiffres", 
+      "droit_reel": "type de droit",
+      "section": "section cadastrale",
+      "numero_plan": "numéro plan",
+      "street_address": "lieu-dit ou localisation propriété",
+      "contenance": "surface 7 chiffres",
+      "HA": "hectares 2 chiffres",
+      "A": "ares 2 chiffres",
+      "CA": "centiares 3 chiffres"
     }
   ]
 }
 
-INSTRUCTIONS SPÉCIFIQUES :
-- DROIT RÉEL : Cherche PP (propriétaire), NU (nu-propriétaire), US (usufruitier), etc.
-- PRÉFIXE : Code avant la section (ex: 000 dans 000A0123)
-- SECTION : Lettre de section (A, B, C, etc.)
-- NUMÉRO : Numéro de parcelle après la section
-- DESIGNATION : Description complète du terrain/parcelle
-- VOIE : Adresse/rue où habite le propriétaire (différent de la parcelle)
-- ID : Créer un ID unique basé sur département+commune+section+numéro
-
 RÈGLES :
-- Une ligne par propriété (même propriétaire = plusieurs lignes si plusieurs propriétés)
-- Si information manquante → "N/A"
+- Une entrée par propriété (même propriétaire = plusieurs entrées si plusieurs propriétés)
+- Si info manquante → "N/A"
 - JSON valide uniquement
-- Pas de texte explicatif
+- Pas de texte en dehors du JSON
 """
             
             response = self.client.chat.completions.create(
@@ -242,21 +234,12 @@ Extrais les propriétés de ce document. Format JSON simple :
 {
   "proprietes": [
     {
-      "department": "département",
-      "commune": "commune",
-      "prefixe": "préfixe",
-      "section": "section",
-      "numero": "numéro",
-      "contenance": "contenance",
-      "droit_reel": "droit réel",
-      "designation_parcelle": "désignation",
       "nom": "nom",
       "prenom": "prénom",
-      "numero_majic": "MAJIC",
-      "voie": "voie",
-      "post_code": "CP",
-      "city": "ville",
-      "id": "ID"
+      "section": "section",
+      "numero_plan": "numéro",
+      "street_address": "lieu-dit",
+      "contenance": "surface"
     }
   ]
 }
@@ -296,9 +279,9 @@ JSON uniquement, pas de texte.
             if "proprietes" in result and result["proprietes"]:
                 # Compléter les champs manquants avec "N/A"
                 for prop in result["proprietes"]:
-                    for field in ["department", "commune", "prefixe", "section", "numero", "contenance", 
-                                "droit_reel", "designation_parcelle", "nom", "prenom", "numero_majic", 
-                                "voie", "post_code", "city", "id"]:
+                    for field in ["nom", "prenom", "adresse_proprietaire", "post_code", "city", 
+                                "numero_proprietaire", "department", "commune", "droit_reel", 
+                                "section", "numero_plan", "street_address", "contenance", "HA", "A", "CA"]:
                         if field not in prop:
                             prop[field] = "N/A"
                 
@@ -360,33 +343,6 @@ JSON uniquement, pas de texte.
         
         return {"HA": ha, "A": a, "CA": ca}
 
-    def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
-        """
-        Génère un identifiant unique pour une propriété.
-        
-        Args:
-            department: Code département
-            commune: Code commune
-            section: Section cadastrale
-            numero: Numéro de parcelle
-            prefixe: Préfixe optionnel
-            
-        Returns:
-            ID unique formaté
-        """
-        # Nettoyer et formater les éléments
-        dept = str(department).zfill(2) if department and department != "N/A" else "00"
-        comm = str(commune).zfill(3) if commune and commune != "N/A" else "000"
-        sect = str(section) if section and section != "N/A" else "A"
-        num = str(numero).zfill(4) if numero and numero != "N/A" else "0000"
-        pref = str(prefixe) if prefixe and prefixe != "N/A" else ""
-        
-        # Format: DÉPARTEMENT_COMMUNE_PRÉFIXE_SECTION_NUMÉRO
-        if pref:
-            return f"{dept}_{comm}_{pref}_{sect}_{num}"
-        else:
-            return f"{dept}_{comm}_{sect}_{num}"
-
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
@@ -431,18 +387,41 @@ JSON uniquement, pas de texte.
         # Traiter chaque propriété combinée
         processed_properties = []
         for property_data in combined_properties:
-            # Générer l'ID unique avec le nouveau modèle
-            unique_id = self.generate_unique_id(
+            # Générer l'ID parcellaire
+            parcel_id = self.generate_parcel_id(
                 department=property_data.get('department', '00'),
                 commune=property_data.get('commune', '000'),
-                section=property_data.get('section', 'A'),
-                numero=property_data.get('numero', '0000'),
-                prefixe=property_data.get('prefixe', '')
+                section=property_data.get('section', self.default_section),
+                plan_number=int(property_data.get('numero_plan', self.default_plan_number)) if property_data.get('numero_plan', '').isdigit() else self.default_plan_number
             )
             
-            # Ajouter l'ID unique
-            property_data['id'] = unique_id
+            # Gérer la contenance - utiliser les champs HA/A/CA s'ils existent, sinon décomposer
+            contenance = property_data.get('contenance', 'N/A')
+            if property_data.get('HA') and property_data.get('A') and property_data.get('CA'):
+                # Utiliser les champs déjà décomposés
+                ha = property_data.get('HA', 'N/A')
+                a = property_data.get('A', 'N/A')
+                ca = property_data.get('CA', 'N/A')
+                # Reconstituer la contenance si elle n'existe pas
+                if contenance == 'N/A' and ha != 'N/A' and a != 'N/A' and ca != 'N/A':
+                    contenance = f"{ha.zfill(2)}{a.zfill(2)}{ca.zfill(3)}"
+            else:
+                # Décomposer la contenance existante
+                contenance_decomposed = self.decompose_contenance(contenance)
+                ha = contenance_decomposed['HA']
+                a = contenance_decomposed['A']
+                ca = contenance_decomposed['CA']
+            
+            # Ajouter toutes les données
+            property_data['id_parcelle'] = parcel_id
             property_data['fichier_source'] = pdf_path.name
+            property_data['HA'] = ha
+            property_data['A'] = a
+            property_data['CA'] = ca
+            
+            # S'assurer que la contenance est bien formatée
+            if contenance != 'N/A':
+                property_data['contenance'] = contenance
             
             # Nettoyer les champs techniques
             property_data.pop('_source_page', None)
@@ -536,7 +515,7 @@ JSON uniquement, pas de texte.
     def has_complete_owner_info(self, prop: Dict) -> bool:
         """Vérifie si une propriété a des informations complètes sur le propriétaire."""
         required_fields = ['nom', 'prenom']
-        optional_fields = ['voie', 'post_code', 'city', 'numero_majic']
+        optional_fields = ['adresse_proprietaire', 'post_code', 'city', 'numero_proprietaire']
         
         # Au moins les champs requis
         has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
@@ -548,8 +527,8 @@ JSON uniquement, pas de texte.
 
     def has_complete_property_info(self, prop: Dict) -> bool:
         """Vérifie si une propriété a des informations complètes sur la parcelle."""
-        required_fields = ['section', 'numero']
-        optional_fields = ['department', 'commune', 'contenance', 'designation_parcelle']
+        required_fields = ['section', 'numero_plan']
+        optional_fields = ['street_address', 'contenance', 'droit_reel', 'department', 'commune']
         
         # Au moins les champs requis
         has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
