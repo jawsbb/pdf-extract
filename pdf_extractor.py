@@ -99,8 +99,8 @@ class PDFPropertyExtractor:
                 try:
                     page = doc[page_num]
                     
-                    # Convertir chaque page en image avec une résolution élevée
-                    mat = fitz.Matrix(4.0, 4.0)  # Augmenté de 3.0 à 4.0 pour une qualité maximale
+                    # Convertir chaque page en image avec une résolution MAXIMALE
+                    mat = fitz.Matrix(5.0, 5.0)  # ULTRA-HAUTE résolution pour extraction optimale
                     pix = page.get_pixmap(matrix=mat)
                     
                     # Convertir en PNG
@@ -123,7 +123,7 @@ class PDFPropertyExtractor:
 
     def extract_info_with_gpt4o(self, image_data: bytes, filename: str) -> Optional[Dict]:
         """
-        Utilise GPT-4o pour extraire les informations de propriétaires depuis l'image.
+        EXTRACTION ULTRA-OPTIMISÉE pour extraire TOUTES les informations possibles.
         
         Args:
             image_data: Données de l'image en bytes
@@ -133,55 +133,127 @@ class PDFPropertyExtractor:
             Dictionnaire contenant les informations extraites ou None en cas d'erreur
         """
         try:
-            logger.info(f"Extraction des informations avec GPT-4o pour {filename}")
+            logger.info(f"🔍 Extraction ULTRA-OPTIMISÉE pour {filename}")
             
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt simple et efficace - retour aux bases
-            prompt = """
-Analyze this French cadastral document and extract ALL property owner information you can see.
+            # PROMPT ULTRA-DÉTAILLÉ avec exemples concrets
+            ultra_prompt = """
+🎯 MISSION CRITIQUE: Tu es un expert en documents cadastraux français. Tu DOIS extraire TOUTES les informations visibles avec une précision maximale.
 
-Look for:
-- Owner names (nom/prénom)
-- Property details (section, numero, contenance)
-- Addresses and postal codes
-- MAJIC codes (like M8BNF6)
-- Department/commune codes
-- Rights (droit réel like PP, US, NU)
+📋 STRATÉGIE D'EXTRACTION EXHAUSTIVE:
 
-Return JSON with this structure:
+1️⃣ LOCALISATION (priorité absolue):
+- Cherche en HAUT du document: codes comme "51179", "25227", "75001" 
+- Format: DEPARTMENT(2 chiffres) + COMMUNE(3 chiffres)
+- Exemples: "51179" = département 51, commune 179
+
+2️⃣ PROPRIÉTAIRES (scan complet):
+- Noms en MAJUSCULES: MARTIN, DUPONT, LAMBIN, etc.
+- Prénoms: Jean, Marie, Didier Jean Guy, etc.
+- Codes MAJIC: M8BNF6, MB43HC, P7QR92 (alphanumériques 6 caractères)
+
+3️⃣ PARCELLES (détection fine):
+- Sections: A, AB, ZY, 000ZD, etc.
+- Numéros: 6, 0006, 123, 0123, etc.
+- Contenance: 230040, 000150, 002300 (format chiffres)
+
+4️⃣ ADRESSES (lecture complète):
+- Voies: "1 RUE D AVAT", "15 AVENUE DE LA PAIX"
+- Codes postaux: 51240, 75001, 13000
+- Villes: COUPEVILLE, PARIS, MARSEILLE
+
+5️⃣ DROITS RÉELS:
+- PP = Pleine Propriété
+- US = Usufruit  
+- NU = Nue-propriété
+
+📊 EXEMPLES CONCRETS DE DONNÉES RÉELLES:
+
+EXEMPLE 1:
+{
+  "department": "51",
+  "commune": "179", 
+  "section": "ZY",
+  "numero": "0006",
+  "contenance": "230040",
+  "droit_reel": "US",
+  "designation_parcelle": "LES ROULLIERS",
+  "nom": "LAMBIN",
+  "prenom": "DIDIER JEAN GUY",
+  "numero_majic": "M8BNF6",
+  "voie": "1 RUE D AVAT",
+  "post_code": "51240",
+  "city": "COUPEVILLE"
+}
+
+EXEMPLE 2:
+{
+  "department": "25",
+  "commune": "227",
+  "section": "000ZD",
+  "numero": "0005",
+  "contenance": "000150",
+  "droit_reel": "PP",
+  "designation_parcelle": "LE GRAND CHAMP",
+  "nom": "MARTIN",
+  "prenom": "PIERRE",
+  "numero_majic": "MB43HC",
+  "voie": "15 RUE DE LA PAIX",
+  "post_code": "25000",
+  "city": "BESANCON"
+}
+
+🔍 INSTRUCTIONS DE SCAN SYSTÉMATIQUE:
+
+1. Commence par scanner TOUT LE HAUT du document pour les codes département/commune
+2. Lit TOUS les noms en majuscules (ce sont les propriétaires)
+3. Trouve TOUS les codes MAJIC (6 caractères alphanumériques)
+4. Récupère TOUTES les adresses complètes
+5. Identifie TOUTES les sections et numéros de parcelles
+6. Collecte TOUTES les contenances (surfaces)
+
+⚠️ RÈGLES STRICTES:
+- Si tu vois une information partiellement, INCLUS-LA quand même
+- Ne mets JAMAIS "N/A" - utilise "" si vraiment absent
+- Scan CHAQUE ZONE du document méthodiquement
+- IGNORE aucun détail, même petit
+- Retourne TOUS les propriétaires trouvés
+
+📤 FORMAT DE RÉPONSE OBLIGATOIRE:
 {
   "proprietes": [
     {
-      "department": "",
-      "commune": "",
+      "department": "XX",
+      "commune": "XXX",
       "prefixe": "",
-      "section": "",
-      "numero": "",
-      "contenance": "",
-      "droit_reel": "",
-      "designation_parcelle": "",
-      "nom": "",
-      "prenom": "",
-      "numero_majic": "",
-      "voie": "",
-      "post_code": "",
-      "city": ""
+      "section": "XXXX",
+      "numero": "XXXX",
+      "contenance": "XXXXXX",
+      "droit_reel": "XX",
+      "designation_parcelle": "LIEU-DIT",
+      "nom": "NOM_PROPRIETAIRE",
+      "prenom": "PRENOM_PROPRIETAIRE",
+      "numero_majic": "XXXXXX",
+      "voie": "ADRESSE_COMPLETE",
+      "post_code": "XXXXX",
+      "city": "VILLE"
     }
   ]
 }
 
-Extract ALL visible information. If something is not visible, use empty string "".
+🎯 OBJECTIF: ZÉRO champ vide si l'info existe dans le document !
 """
             
+            # PREMIÈRE PASSE: Extraction principale ultra-détaillée
             response = self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": ultra_prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
@@ -192,35 +264,296 @@ Extract ALL visible information. If something is not visible, use empty string "
                         ]
                     }
                 ],
-                max_tokens=3000,
+                max_tokens=4000,
                 temperature=0.0
             )
             
             # Parser la réponse JSON
             response_text = response.choices[0].message.content.strip()
             
-            # Nettoyer la réponse si elle contient des backticks
+            # Nettoyer la réponse
             if response_text.startswith('```json'):
                 response_text = response_text[7:-3]
             elif response_text.startswith('```'):
                 response_text = response_text[3:-3]
             
             try:
-                result = json.loads(response_text)
-                if "proprietes" in result and result["proprietes"]:
-                    logger.info(f"Extraction réussie pour {filename}: {len(result['proprietes'])} propriété(s) trouvé(s)")
-                    return result
+                main_result = json.loads(response_text)
+                
+                if "proprietes" in main_result and main_result["proprietes"]:
+                    properties = main_result["proprietes"]
+                    logger.info(f"✅ Extraction principale: {len(properties)} propriété(s) pour {filename}")
+                    
+                    # DEUXIÈME PASSE: Récupération des champs manquants
+                    enhanced_properties = self.enhance_missing_fields(properties, base64_image, filename)
+                    
+                    if enhanced_properties:
+                        logger.info(f"🚀 Extraction ULTRA-OPTIMISÉE terminée: {len(enhanced_properties)} propriété(s) pour {filename}")
+                        return {"proprietes": enhanced_properties}
+                    else:
+                        return main_result
                 else:
-                    logger.warning(f"❌ Aucune propriété trouvée pour {filename}")
-                    return None
+                    logger.warning(f"❌ Extraction principale sans résultat pour {filename}")
+                    # PASSE DE SECOURS: Extraction d'urgence
+                    return self.emergency_extraction(base64_image, filename)
+                    
             except json.JSONDecodeError as e:
-                logger.error(f"Erreur de parsing JSON pour {filename}: {e}")
-                logger.error(f"Réponse reçue: {response_text[:500]}...")
-                return None
+                logger.error(f"Erreur JSON pour {filename}: {e}")
+                logger.error(f"Réponse: {response_text[:500]}...")
+                # PASSE DE SECOURS en cas d'erreur JSON
+                return self.emergency_extraction(base64_image, filename)
                 
         except Exception as e:
-            logger.error(f"Erreur lors de l'extraction GPT-4o pour {filename}: {e}")
+            logger.error(f"Erreur extraction pour {filename}: {e}")
             return None
+
+    def enhance_missing_fields(self, properties: List[Dict], base64_image: str, filename: str) -> List[Dict]:
+        """
+        DEUXIÈME PASSE: Amélioration ciblée des champs manquants.
+        """
+        try:
+            # Analyser quels champs sont manquants
+            missing_fields = {}
+            critical_fields = ['department', 'commune', 'nom', 'prenom', 'section', 'numero']
+            
+            for prop in properties:
+                for field in critical_fields:
+                    if not prop.get(field) or prop.get(field) == "":
+                        if field not in missing_fields:
+                            missing_fields[field] = 0
+                        missing_fields[field] += 1
+            
+            if not missing_fields:
+                logger.info(f"✅ Tous les champs critiques présents pour {filename}")
+                return properties
+            
+            logger.info(f"🔍 Récupération ciblée pour {filename}: {missing_fields}")
+            
+            # Prompt ciblé pour les champs manquants les plus critiques
+            if 'department' in missing_fields or 'commune' in missing_fields:
+                properties = self.extract_location_info(properties, base64_image, filename)
+            
+            if 'nom' in missing_fields or 'prenom' in missing_fields:
+                properties = self.extract_owner_info(properties, base64_image, filename)
+            
+            return properties
+            
+        except Exception as e:
+            logger.error(f"Erreur enhancement pour {filename}: {e}")
+            return properties
+
+    def extract_location_info(self, properties: List[Dict], base64_image: str, filename: str) -> List[Dict]:
+        """Extraction ciblée des informations de localisation."""
+        try:
+            location_prompt = """
+🎯 MISSION SPÉCIALISÉE: Trouve les codes département et commune dans ce document cadastral.
+
+🔍 RECHERCHE INTENSIVE:
+- Scan le HEADER du document
+- Cherche des codes à 5 chiffres comme: 51179, 25227, 75001
+- Format: 2 chiffres département + 3 chiffres commune
+- Peut être écrit: 51 179, 51-179, ou 51179
+
+Exemples typiques:
+- "51179" → département: "51", commune: "179"
+- "25227" → département: "25", commune: "227"
+- "75001" → département: "75", commune: "001"
+
+📤 RÉPONSE FORMAT:
+{
+  "location": {
+    "department": "XX",
+    "commune": "XXX"
+  }
+}
+
+⚠️ CRUCIAL: Ces codes sont TOUJOURS dans l'en-tête du document !
+"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": location_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.0
+            )
+            
+            location_text = response.choices[0].message.content.strip()
+            if "```json" in location_text:
+                location_text = location_text.split("```json")[1].split("```")[0].strip()
+            
+            location_data = json.loads(location_text)
+            
+            if "location" in location_data:
+                dept = location_data["location"].get("department")
+                commune = location_data["location"].get("commune")
+                
+                if dept or commune:
+                    for prop in properties:
+                        if not prop.get("department") and dept:
+                            prop["department"] = dept
+                        if not prop.get("commune") and commune:
+                            prop["commune"] = commune
+                    
+                    logger.info(f"✅ Localisation récupérée: dept={dept}, commune={commune}")
+            
+        except Exception as e:
+            logger.warning(f"Erreur extraction localisation: {e}")
+        
+        return properties
+
+    def extract_owner_info(self, properties: List[Dict], base64_image: str, filename: str) -> List[Dict]:
+        """Extraction ciblée des informations propriétaires."""
+        try:
+            owner_prompt = """
+🎯 MISSION: Trouve TOUS les propriétaires dans ce document cadastral.
+
+🔍 RECHERCHE SYSTÉMATIQUE:
+- Noms en MAJUSCULES: MARTIN, DUPONT, LAMBIN, BERNARD, etc.
+- Prénoms: Jean, Marie, Pierre, Didier Jean Guy, etc.
+- Codes MAJIC: M8BNF6, MB43HC, P7QR92 (6 caractères alphanumériques)
+- Adresses complètes: "1 RUE D AVAT", "15 AVENUE DE LA PAIX"
+
+📤 FORMAT RÉPONSE:
+{
+  "owners": [
+    {
+      "nom": "NOM_MAJUSCULE",
+      "prenom": "Prénom Complet",
+      "numero_majic": "XXXXXX",
+      "voie": "Adresse complète",
+      "post_code": "XXXXX",
+      "city": "VILLE"
+    }
+  ]
+}
+
+⚠️ Scan TOUT le document pour les propriétaires !
+"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": owner_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.0
+            )
+            
+            owner_text = response.choices[0].message.content.strip()
+            if "```json" in owner_text:
+                owner_text = owner_text.split("```json")[1].split("```")[0].strip()
+            
+            owner_data = json.loads(owner_text)
+            
+            if "owners" in owner_data and owner_data["owners"]:
+                owners = owner_data["owners"]
+                
+                # Fusionner avec les propriétés existantes
+                for i, prop in enumerate(properties):
+                    if i < len(owners):
+                        owner = owners[i]
+                        for field in ['nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city']:
+                            if not prop.get(field) and owner.get(field):
+                                prop[field] = owner[field]
+                
+                logger.info(f"✅ Propriétaires récupérés: {len(owners)}")
+        
+        except Exception as e:
+            logger.warning(f"Erreur extraction propriétaires: {e}")
+        
+        return properties
+
+    def emergency_extraction(self, base64_image: str, filename: str) -> Optional[Dict]:
+        """
+        EXTRACTION D'URGENCE: Dernière tentative avec prompt ultra-simple.
+        """
+        try:
+            logger.info(f"🚨 Extraction d'urgence pour {filename}")
+            
+            emergency_prompt = """
+Regarde ce document cadastral français et trouve:
+1. Tous les NOMS en MAJUSCULES
+2. Tous les codes à 5 chiffres (département+commune)
+3. Toutes les sections (lettres comme A, ZY)
+4. Tous les numéros de parcelles
+
+Retourne TOUT ce que tu vois en JSON:
+{
+  "proprietes": [
+    {
+      "department": "",
+      "commune": "",
+      "section": "",
+      "numero": "",
+      "nom": "",
+      "prenom": "",
+      "voie": "",
+      "city": ""
+    }
+  ]
+}
+"""
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": emergency_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.1
+            )
+            
+            emergency_text = response.choices[0].message.content.strip()
+            if "```json" in emergency_text:
+                emergency_text = emergency_text.split("```json")[1].split("```")[0].strip()
+            
+            result = json.loads(emergency_text)
+            if "proprietes" in result and result["proprietes"]:
+                logger.info(f"🆘 Extraction d'urgence réussie: {len(result['proprietes'])} propriété(s)")
+                return result
+            
+        except Exception as e:
+            logger.error(f"Échec extraction d'urgence pour {filename}: {e}")
+        
+        return None
 
     def generate_parcel_id(self, department: str, commune: str, section: str = None, plan_number: int = None) -> str:
         """
