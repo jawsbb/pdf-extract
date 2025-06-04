@@ -133,13 +133,25 @@ class PDFPropertyExtractor:
             Dictionnaire contenant les informations extraites ou None en cas d'erreur
         """
         try:
-            logger.info(f"🔍 Extraction ULTRA-OPTIMISÉE pour {filename}")
+            logger.info(f"🔍 Extraction ADAPTATIVE pour {filename}")
+            
+            # PHASE 1: DÉTECTION AUTOMATIQUE du format PDF
+            format_info = self.detect_pdf_format(image_data)
+            logger.info(f"📊 Format: {format_info.get('document_type')} | Époque: {format_info.get('format_era')} | Layout: {format_info.get('layout')}")
             
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # PROMPT ULTRA-DÉTAILLÉ avec exemples concrets
-            ultra_prompt = """
+            # PHASE 2: PROMPT ADAPTATIF selon le format détecté
+            adapted_prompt = self.adapt_extraction_prompt(format_info)
+            
+            # PROMPT ADAPTATIF remplace l'ancien prompt fixe
+            # (L'ancien prompt ultra-détaillé est maintenant dans adapt_extraction_prompt)
+            logger.info(f"🎯 Utilisation stratégie: {format_info.get('extraction_strategy')}")
+            
+            # Fallback: si la détection échoue, utiliser le prompt ultra-détaillé original
+            if not adapted_prompt:
+                adapted_prompt = """
 🎯 MISSION CRITIQUE: Tu es un expert en documents cadastraux français. Tu DOIS extraire TOUTES les informations visibles avec une précision maximale.
 
 📋 STRATÉGIE D'EXTRACTION EXHAUSTIVE:
@@ -253,7 +265,7 @@ EXEMPLE 2:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": ultra_prompt},
+                            {"type": "text", "text": adapted_prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
@@ -667,16 +679,15 @@ Retourne TOUT ce que tu vois en JSON:
 
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
-        Traite un seul fichier PDF et retourne les informations extraites.
-        VERSION SIMPLIFIÉE - suppression de toutes les couches complexes
+        Traite un PDF MULTI-PAGES avec fusion intelligente des données.
         
         Args:
             pdf_path: Chemin vers le fichier PDF
             
         Returns:
-            Liste des propriétaires avec leurs informations
+            Liste des propriétaires avec leurs informations fusionnées
         """
-        logger.info(f"🔄 Traitement de {pdf_path.name}")
+        logger.info(f"🔄 Traitement MULTI-PAGES de {pdf_path.name}")
         
         # Convertir en images
         images = self.pdf_to_images(pdf_path)
@@ -684,30 +695,458 @@ Retourne TOUT ce que tu vois en JSON:
             logger.error(f"❌ Échec de la conversion en images pour {pdf_path.name}")
             return []
         
-        # Extraire les informations avec GPT-4o pour chaque page
-        all_properties = []
+        # PHASE 1: Extraction de TOUTES les pages
+        all_page_data = []
         for page_num, image_data in enumerate(images, 1):
-            logger.info(f"Extraction des données de la page {page_num}/{len(images)} pour {pdf_path.name}")
+            logger.info(f"📄 Extraction page {page_num}/{len(images)} pour {pdf_path.name}")
             extracted_data = self.extract_info_with_gpt4o(image_data, f"{pdf_path.name} (page {page_num})")
             if extracted_data and 'proprietes' in extracted_data:
-                for prop in extracted_data['proprietes']:
-                    # Générer l'ID unique
-                    unique_id = self.generate_unique_id(
-                        department=prop.get('department', '00'),
-                        commune=prop.get('commune', '000'),
-                        section=prop.get('section', 'A'),
-                        numero=prop.get('numero', '0000'),
-                        prefixe=prop.get('prefixe', '')
-                    )
-                    
-                    # Ajouter l'ID unique et le fichier source
-                    prop['id'] = unique_id
-                    prop['fichier_source'] = pdf_path.name
-                    
-                    all_properties.append(prop)
+                all_page_data.extend(extracted_data['proprietes'])
+                logger.info(f"✅ Page {page_num}: {len(extracted_data['proprietes'])} élément(s) extraits")
+            else:
+                logger.warning(f"⚠️ Page {page_num}: aucune donnée extraite")
         
-        logger.info(f"✅ {pdf_path.name} traité avec succès - {len(all_properties)} propriété(s)")
-        return all_properties
+        if not all_page_data:
+            logger.error(f"❌ Aucune donnée extraite de {pdf_path.name}")
+            return []
+        
+        logger.info(f"📊 Total éléments bruts extraits: {len(all_page_data)}")
+        
+        # PHASE 2: FUSION INTELLIGENTE multi-pages
+        merged_properties = self.smart_merge_multi_page_data(all_page_data, pdf_path.name)
+        
+        # PHASE 3: Finalisation avec IDs uniques
+        final_properties = []
+        for prop in merged_properties:
+            # Générer l'ID unique
+            unique_id = self.generate_unique_id(
+                department=prop.get('department', '00'),
+                commune=prop.get('commune', '000'),
+                section=prop.get('section', 'A'),
+                numero=prop.get('numero', '0000'),
+                prefixe=prop.get('prefixe', '')
+            )
+            
+            # Ajouter l'ID unique et le fichier source
+            prop['id'] = unique_id
+            prop['fichier_source'] = pdf_path.name
+            
+            final_properties.append(prop)
+        
+        logger.info(f"🎉 {pdf_path.name} FUSIONNÉ avec succès - {len(final_properties)} propriété(s) complète(s)")
+        return final_properties
+
+    def detect_pdf_format(self, image_data: bytes) -> Dict:
+        """
+        DÉTECTE automatiquement le type/format du PDF cadastral.
+        Chaque département/commune a son propre format !
+        """
+        detection_prompt = """
+        Tu es un expert en documents cadastraux français. Analyse cette image et détermine :
+
+        1. TYPE DE DOCUMENT :
+           - Extrait cadastral (avec propriétaires)
+           - Matrice cadastrale  
+           - État de section
+           - Plan cadastral
+           - Autre
+
+        2. FORMAT/ÉPOQUE :
+           - Moderne (post-2010) - tableaux structurés, codes MAJIC
+           - Intermédiaire (2000-2010) - semi-structuré
+           - Ancien (pré-2000) - format libre
+
+        3. MISE EN PAGE :
+           - Une seule page avec tout
+           - Multi-pages (info dispersée)
+           - Tableau structuré
+           - Texte libre
+
+        4. INFORMATIONS VISIBLES :
+           - Département/commune en en-tête
+           - Codes MAJIC visibles (6 chars alphanumériques)
+           - Parcelles avec sections/numéros
+           - Propriétaires avec noms/prénoms
+           - Adresses complètes
+
+        Réponds en JSON :
+        {
+            "document_type": "extrait|matrice|section|plan|autre",
+            "format_era": "moderne|intermediaire|ancien", 
+            "layout": "single_page|multi_page|tableau|texte_libre",
+            "visible_info": {
+                "location_header": true/false,
+                "majic_codes": true/false,
+                "parcels_listed": true/false,
+                "owners_listed": true/false,
+                "addresses_present": true/false
+            },
+            "extraction_strategy": "complete|location_focus|parcel_focus|owner_focus|mixed"
+        }
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": detection_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(image_data).decode()}"}}
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            detection_result = json.loads(response.choices[0].message.content.strip())
+            logger.info(f"🔍 Format détecté: {detection_result.get('document_type')} - {detection_result.get('format_era')} - Stratégie: {detection_result.get('extraction_strategy')}")
+            return detection_result
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Échec détection format: {e}")
+            # Format par défaut pour extraction maximale
+            return {
+                "document_type": "extrait",
+                "format_era": "moderne", 
+                "layout": "multi_page",
+                "visible_info": {
+                    "location_header": True,
+                    "majic_codes": True,
+                    "parcels_listed": True,
+                    "owners_listed": True,
+                    "addresses_present": True
+                },
+                "extraction_strategy": "complete"
+            }
+
+    def adapt_extraction_prompt(self, format_info: Dict) -> str:
+        """
+        ADAPTE le prompt d'extraction selon le format détecté.
+        Chaque type de PDF nécessite une approche différente !
+        """
+        base_examples = """
+🎯 EXEMPLES ULTRA-PRÉCIS avec TOUTES les colonnes importantes:
+
+EXEMPLE DÉPARTEMENT 51:
+{
+  "department": "51",
+  "commune": "179", 
+  "prefixe": "",
+  "section": "000ZE",
+  "numero": "0025",
+  "contenance": "001045",     ⬅️ CONTENANCE = SURFACE en m² (OBLIGATOIRE!)
+  "droit_reel": "US",
+  "designation_parcelle": "LES ROULLIERS",
+  "nom": "LAMBIN",
+  "prenom": "DIDIER JEAN GUY",
+  "numero_majic": "M8BNF6",
+  "voie": "1 RUE D AVAT",
+  "post_code": "51240",
+  "city": "COUPEVILLE"
+}
+
+EXEMPLE DÉPARTEMENT 25:
+{
+  "department": "25",
+  "commune": "227",
+  "prefixe": "",
+  "section": "000ZD",
+  "numero": "0005",
+  "contenance": "000150",     ⬅️ SURFACE = 150m² (CHERCHE ça partout!)
+  "droit_reel": "PP",
+  "designation_parcelle": "LE GRAND CHAMP",
+  "nom": "MARTIN",
+  "prenom": "PIERRE",
+  "numero_majic": "MB43HC",
+  "voie": "15 RUE DE LA PAIX", 
+  "post_code": "25000",
+  "city": "BESANCON"
+}
+"""
+
+        # Adaptations selon le format détecté
+        if format_info.get('document_type') == 'matrice':
+            specific_instructions = """
+🎯 DOCUMENT TYPE: MATRICE CADASTRALE
+- Focus sur les TABLES avec colonnes structurées
+- Propriétaires souvent dans colonne de droite
+- Parcelles dans colonnes de gauche
+- ⭐ CONTENANCE dans colonne "Surface" ou "Cont." ou chiffres + m²
+- Scan ligne par ligne méthodiquement
+"""
+        elif format_info.get('layout') == 'tableau':
+            specific_instructions = """
+🎯 FORMAT: TABLEAU STRUCTURÉ
+- Identifie les EN-TÊTES de colonnes
+- Cherche colonnes: "Surface", "Contenance", "m²", "ares", "ca"
+- Lit chaque LIGNE du tableau
+- Associe chaque valeur à sa colonne
+- ⭐ CONTENANCE = valeurs numériques dans colonnes surface
+- Attention aux cellules fusionnées
+"""
+        elif format_info.get('format_era') == 'ancien':
+            specific_instructions = """
+🎯 FORMAT: ANCIEN/LIBRE
+- Scan TOUT le texte zone par zone
+- Cherche les motifs : "NOM Prénom", codes, adresses
+- Les infos peuvent être DISPERSÉES
+- Utilise le contexte pour regrouper
+"""
+        else:
+            specific_instructions = """
+🎯 FORMAT: MODERNE/STANDARD
+- Scan systématique de HAUT en BAS
+- En-têtes pour département/commune
+- Propriétaires en MAJUSCULES
+- Codes MAJIC (6 caractères)
+- ⭐ CONTENANCE = recherche "m²", "ares", "ca" + chiffres associés
+- Sections format "000XX" ou "XX" + numéros parcelles
+"""
+
+        # Instructions spécifiques selon ce qui est visible
+        if not format_info.get('visible_info', {}).get('majic_codes'):
+            majic_note = "⚠️ CODES MAJIC probablement ABSENTS - concentre-toi sur noms/adresses"
+        else:
+            majic_note = "🎯 CODES MAJIC PRÉSENTS - scan tous les codes 6 caractères"
+
+        if format_info.get('extraction_strategy') == 'location_focus':
+            strategy_note = "🎯 PRIORITÉ: Département/Commune/Localisation"
+        elif format_info.get('extraction_strategy') == 'owner_focus':
+            strategy_note = "🎯 PRIORITÉ: Propriétaires/Noms/Adresses/MAJIC"
+        elif format_info.get('extraction_strategy') == 'parcel_focus':
+            strategy_note = "🎯 PRIORITÉ: Parcelles/Sections/Numéros/Contenances"
+        else:
+            strategy_note = "🎯 EXTRACTION COMPLÈTE de TOUTES les informations"
+
+        # Prompt adaptatif final
+        adapted_prompt = f"""
+Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a été analysé automatiquement.
+
+{specific_instructions}
+
+{strategy_note}
+{majic_note}
+
+{base_examples}
+
+🔍 INSTRUCTIONS DE SCAN ADAPTATIF ULTRA-PRÉCIS:
+1. Applique la stratégie détectée ci-dessus
+2. Scan MÉTHODIQUEMENT selon le type de mise en page  
+3. ⭐ CONTENANCE = SURFACE : Cherche PARTOUT les chiffres suivis de "m²", "ares", "ca" (centiares)
+4. ⭐ SECTION + NUMÉRO : Formats "000ZE", "ZE", "003", toujours ensemble
+5. ⭐ NOMS/PRÉNOMS : MAJUSCULES = nom, minuscules = prénom  
+6. ⭐ CODES MAJIC : Exactement 6 caractères alphanumériques
+7. ⭐ ADRESSES : Numéro + nom de rue + code postal + ville
+8. Collecte TOUTES les informations visibles
+9. Regroupe intelligemment les données dispersées
+10. Ne laisse RIEN passer, même les valeurs partielles
+
+⚠️ RÈGLES STRICTES:
+- ADAPTE ta lecture au format détecté
+- Si info partiellement visible, INCLUS-LA
+- JAMAIS de "N/A" - utilise "" si vraiment absent
+- IGNORE aucun détail même petit
+- Retourne TOUS les propriétaires trouvés
+
+📤 FORMAT RÉPONSE:
+{{
+  "proprietes": [
+    {{
+      "department": "",
+      "commune": "",
+      "prefixe": "",
+      "section": "",
+      "numero": "",
+      "contenance": "",
+      "droit_reel": "",
+      "designation_parcelle": "",
+      "nom": "",
+      "prenom": "",
+      "numero_majic": "",
+      "voie": "",
+      "post_code": "",
+      "city": ""
+    }}
+  ]
+}}
+"""
+        return adapted_prompt
+
+    def smart_merge_multi_page_data(self, all_page_data: List[Dict], filename: str) -> List[Dict]:
+        """
+        FUSION INTELLIGENTE des données multi-pages.
+        Combine les informations dispersées sur plusieurs pages en propriétés complètes.
+        """
+        logger.info(f"🧠 Fusion intelligente de {len(all_page_data)} éléments pour {filename}")
+        
+        # Séparer les données par type d'information
+        location_data = {}  # département/commune communs
+        owners_data = []    # propriétaires avec infos complètes
+        parcels_data = []   # parcelles avec sections/numéros
+        mixed_data = []     # données mixtes
+        
+        # PHASE 1: Classification des données extraites
+        for item in all_page_data:
+            has_owner = bool(item.get('nom') or item.get('prenom'))
+            has_parcel = bool(item.get('section') or item.get('numero'))
+            has_location = bool(item.get('department') or item.get('commune'))
+            
+            if has_location and not location_data:
+                # Stocker les infos de localisation (département/commune)
+                location_data = {
+                    'department': item.get('department', ''),
+                    'commune': item.get('commune', ''),
+                    'post_code': item.get('post_code', ''),
+                    'city': item.get('city', '')
+                }
+                logger.info(f"📍 Localisation trouvée: {location_data}")
+            
+            if has_owner and has_parcel:
+                # Données complètes
+                mixed_data.append(item)
+            elif has_owner:
+                # Données propriétaire uniquement
+                owners_data.append(item)
+            elif has_parcel:
+                # Données parcelle uniquement  
+                parcels_data.append(item)
+        
+        logger.info(f"📋 Classification: {len(mixed_data)} complètes, {len(owners_data)} propriétaires, {len(parcels_data)} parcelles")
+        
+        # PHASE 2: Stratégie de fusion selon les données disponibles
+        merged_properties = []
+        
+        if mixed_data:
+            # Cas optimal: données déjà complètes
+            for item in mixed_data:
+                # Enrichir avec les infos de localisation si manquantes
+                if not item.get('department') and location_data.get('department'):
+                    item['department'] = location_data['department']
+                if not item.get('commune') and location_data.get('commune'):
+                    item['commune'] = location_data['commune']
+                if not item.get('post_code') and location_data.get('post_code'):
+                    item['post_code'] = location_data['post_code']
+                if not item.get('city') and location_data.get('city'):
+                    item['city'] = location_data['city']
+                
+                merged_properties.append(item)
+                
+        elif owners_data and parcels_data:
+            # Fusion propriétaires + parcelles
+            logger.info(f"🔗 Fusion {len(owners_data)} propriétaires avec {len(parcels_data)} parcelles")
+            
+            # Stratégie: croiser chaque propriétaire avec chaque parcelle
+            for owner in owners_data:
+                for parcel in parcels_data:
+                    merged_prop = self.merge_owner_parcel(owner, parcel, location_data)
+                    merged_properties.append(merged_prop)
+                    
+        elif owners_data:
+            # Seulement des propriétaires - enrichir avec localisation
+            for owner in owners_data:
+                merged_prop = owner.copy()
+                # Ajouter les infos de localisation
+                for key, value in location_data.items():
+                    if not merged_prop.get(key) and value:
+                        merged_prop[key] = value
+                merged_properties.append(merged_prop)
+                
+        elif parcels_data:
+            # Seulement des parcelles - enrichir avec localisation  
+            for parcel in parcels_data:
+                merged_prop = parcel.copy()
+                # Ajouter les infos de localisation
+                for key, value in location_data.items():
+                    if not merged_prop.get(key) and value:
+                        merged_prop[key] = value
+                merged_properties.append(merged_prop)
+        
+        else:
+            # Cas de secours: utiliser toutes les données brutes
+            merged_properties = all_page_data
+        
+        # PHASE 3: Nettoyage et déduplication
+        cleaned_properties = self.clean_and_deduplicate(merged_properties, filename)
+        
+        logger.info(f"✨ Fusion terminée: {len(cleaned_properties)} propriété(s) finales")
+        return cleaned_properties
+
+    def merge_owner_parcel(self, owner: Dict, parcel: Dict, location: Dict) -> Dict:
+        """
+        Fusionne intelligemment les données propriétaire + parcelle + localisation.
+        """
+        merged = {}
+        
+        # Priorité aux données propriétaire pour les champs propriétaire
+        owner_fields = ['nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city']
+        for field in owner_fields:
+            merged[field] = owner.get(field, '')
+        
+        # Priorité aux données parcelle pour les champs parcelle
+        parcel_fields = ['section', 'numero', 'contenance', 'droit_reel', 'designation_parcelle', 'prefixe']
+        for field in parcel_fields:
+            merged[field] = parcel.get(field, '')
+        
+        # Utiliser les données de localisation pour les champs manquants
+        location_fields = ['department', 'commune', 'post_code', 'city']
+        for field in location_fields:
+            if not merged.get(field) and location.get(field):
+                merged[field] = location[field]
+        
+        # Si encore des champs manquants, essayer de les récupérer de l'autre source
+        for field in ['department', 'commune']:
+            if not merged.get(field):
+                merged[field] = owner.get(field, parcel.get(field, ''))
+        
+        return merged
+
+    def clean_and_deduplicate(self, properties: List[Dict], filename: str) -> List[Dict]:
+        """
+        Nettoie et déduplique les propriétés fusionnées.
+        """
+        if not properties:
+            return []
+        
+        cleaned = []
+        seen_combinations = set()
+        
+        for prop in properties:
+            # Créer une clé unique basée sur les champs critiques
+            key_fields = [
+                prop.get('nom', ''),
+                prop.get('prenom', ''),
+                prop.get('section', ''),
+                prop.get('numero', ''),
+                prop.get('numero_majic', '')
+            ]
+            unique_key = '|'.join(str(f).strip() for f in key_fields)
+            
+            # Ignorer les entrées complètement vides
+            if not any(key_fields) or unique_key == '||||':
+                continue
+            
+            # Déduplication
+            if unique_key not in seen_combinations:
+                seen_combinations.add(unique_key)
+                
+                # Assurer que tous les champs requis existent
+                required_fields = [
+                    'department', 'commune', 'prefixe', 'section', 'numero', 
+                    'contenance', 'droit_reel', 'designation_parcelle', 
+                    'nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city'
+                ]
+                
+                for field in required_fields:
+                    if field not in prop:
+                        prop[field] = ''
+                
+                cleaned.append(prop)
+        
+        logger.info(f"🧹 Nettoyage: {len(properties)} → {len(cleaned)} propriétés après déduplication")
+        return cleaned
 
     def export_to_csv(self, all_properties: List[Dict], output_filename: str = "output.csv") -> None:
         """
