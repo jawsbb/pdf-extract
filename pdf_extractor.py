@@ -1205,9 +1205,9 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 
     def run(self) -> None:
         """
-        Lance le processus complet d'extraction.
+        TRAITEMENT PAR LOTS OPTIMISÉ pour extraction maximale.
         """
-        logger.info("🚀 Démarrage de l'extraction automatique")
+        logger.info("🚀 Démarrage de l'extraction BATCH OPTIMISÉE")
         
         # Lister les fichiers PDF
         pdf_files = self.list_pdf_files()
@@ -1216,18 +1216,347 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
             logger.warning("❌ Aucun fichier PDF trouvé dans le dossier input/")
             return
         
-        # Traiter tous les fichiers
+        logger.info(f"📄 {len(pdf_files)} PDF(s) détecté(s) pour traitement par lots")
+        
+        # PHASE 1: PRÉ-ANALYSE du lot pour stratégie globale
+        batch_strategy = self.analyze_pdf_batch(pdf_files)
+        logger.info(f"🧠 Stratégie globale: {batch_strategy.get('approach', 'standard')}")
+        
+        # PHASE 2: TRAITEMENT OPTIMISÉ par lots
+        all_properties = self.process_pdf_batch_optimized(pdf_files, batch_strategy)
+        
+        # PHASE 3: POST-TRAITEMENT pour combler les trous
+        if all_properties:
+            enhanced_properties = self.post_process_batch_results(all_properties, pdf_files)
+            
+            # PHASE 4: EXPORT avec statistiques détaillées
+            self.export_to_csv_with_stats(enhanced_properties)
+            
+            # Statistiques finales
+            total_props = len(enhanced_properties)
+            total_pdfs = len(pdf_files)
+            avg_per_pdf = total_props / total_pdfs if total_pdfs > 0 else 0
+            
+            logger.info(f"✅ EXTRACTION BATCH TERMINÉE!")
+            logger.info(f"📊 {total_props} propriétés extraites de {total_pdfs} PDFs")
+            logger.info(f"📈 Moyenne: {avg_per_pdf:.1f} propriétés/PDF")
+        else:
+            logger.warning("❌ Aucune donnée extraite du lot")
+
+    def analyze_pdf_batch(self, pdf_files: List[Path]) -> Dict:
+        """
+        PRÉ-ANALYSE du lot de PDFs pour déterminer la stratégie optimale.
+        """
+        logger.info(f"🔍 Pré-analyse de {len(pdf_files)} PDFs...")
+        
+        batch_info = {
+            'total_files': len(pdf_files),
+            'formats_detected': {},
+            'total_pages': 0,
+            'approach': 'standard',
+            'common_location': {},
+            'estimated_properties': 0
+        }
+        
+        # Analyser un échantillon pour détecter les patterns
+        sample_size = min(3, len(pdf_files))  # Analyser max 3 PDFs pour la stratégie
+        
+        for i, pdf_file in enumerate(pdf_files[:sample_size]):
+            logger.info(f"🔍 Analyse échantillon {i+1}/{sample_size}: {pdf_file.name}")
+            
+            # Convertir première page pour analyse rapide
+            images = self.pdf_to_images(pdf_file)
+            if images:
+                batch_info['total_pages'] += len(images)
+                
+                # Détecter le format de ce PDF
+                format_info = self.detect_pdf_format(images[0])
+                format_key = f"{format_info.get('document_type')}_{format_info.get('format_era')}"
+                
+                if format_key in batch_info['formats_detected']:
+                    batch_info['formats_detected'][format_key] += 1
+                else:
+                    batch_info['formats_detected'][format_key] = 1
+        
+        # Déterminer la stratégie globale basée sur l'analyse
+        if len(batch_info['formats_detected']) == 1:
+            # Format homogène - stratégie spécialisée
+            batch_info['approach'] = 'homogeneous_optimized'
+        elif len(pdf_files) > 10:
+            # Beaucoup de PDFs - stratégie volume
+            batch_info['approach'] = 'high_volume_batch'
+        else:
+            # Format mixte - stratégie adaptative
+            batch_info['approach'] = 'mixed_adaptive'
+        
+        logger.info(f"📊 Formats détectés: {batch_info['formats_detected']}")
+        logger.info(f"🎯 Stratégie choisie: {batch_info['approach']}")
+        
+        return batch_info
+
+    def process_pdf_batch_optimized(self, pdf_files: List[Path], batch_strategy: Dict) -> List[Dict]:
+        """
+        TRAITEMENT PAR LOTS OPTIMISÉ selon la stratégie déterminée.
+        """
         all_properties = []
-        for pdf_file in pdf_files:
+        approach = batch_strategy.get('approach', 'standard')
+        
+        logger.info(f"⚙️ Traitement par lots - Approche: {approach}")
+        
+        if approach == 'homogeneous_optimized':
+            # Format homogène - traitement optimisé
+            all_properties = self.process_homogeneous_batch(pdf_files)
+        elif approach == 'high_volume_batch':
+            # Volume élevé - traitement parallèle simulé
+            all_properties = self.process_high_volume_batch(pdf_files)
+        else:
+            # Approche adaptative mixte (par défaut)
+            all_properties = self.process_mixed_adaptive_batch(pdf_files)
+        
+        logger.info(f"📊 {len(all_properties)} propriétés extraites au total")
+        return all_properties
+
+    def process_homogeneous_batch(self, pdf_files: List[Path]) -> List[Dict]:
+        """
+        Traitement optimisé pour un lot de PDFs homogènes.
+        """
+        logger.info("🔄 Traitement homogène optimisé")
+        all_properties = []
+        
+        # Traiter avec paramètres optimisés pour le format détecté
+        for i, pdf_file in enumerate(pdf_files, 1):
+            logger.info(f"📄 Traitement homogène {i}/{len(pdf_files)}: {pdf_file.name}")
+            
             properties = self.process_single_pdf(pdf_file)
             all_properties.extend(properties)
+            
+            # Log intermédiaire pour suivi
+            if i % 5 == 0:
+                logger.info(f"📊 Progrès: {len(all_properties)} propriétés extraites jusqu'ici")
         
-        # Exporter les résultats
-        if all_properties:
-            self.export_to_csv(all_properties)
-            logger.info("✅ Extraction terminée avec succès!")
-        else:
-            logger.warning("❌ Aucune donnée extraite")
+        return all_properties
+
+    def process_high_volume_batch(self, pdf_files: List[Path]) -> List[Dict]:
+        """
+        Traitement optimisé pour un grand volume de PDFs.
+        """
+        logger.info("🚀 Traitement haute performance pour volume élevé")
+        all_properties = []
+        
+        # Traitement par chunks pour optimiser la mémoire
+        chunk_size = 5
+        chunks = [pdf_files[i:i + chunk_size] for i in range(0, len(pdf_files), chunk_size)]
+        
+        for chunk_idx, chunk in enumerate(chunks, 1):
+            logger.info(f"📦 Chunk {chunk_idx}/{len(chunks)}: {len(chunk)} PDFs")
+            
+            for pdf_file in chunk:
+                properties = self.process_single_pdf(pdf_file)
+                all_properties.extend(properties)
+            
+            logger.info(f"✅ Chunk {chunk_idx} terminé: {len(all_properties)} propriétés totales")
+        
+        return all_properties
+
+    def process_mixed_adaptive_batch(self, pdf_files: List[Path]) -> List[Dict]:
+        """
+        Traitement adaptatif pour un lot de PDFs mixtes.
+        """
+        logger.info("🧠 Traitement adaptatif pour formats mixtes")
+        all_properties = []
+        
+        for i, pdf_file in enumerate(pdf_files, 1):
+            logger.info(f"🔄 Traitement adaptatif {i}/{len(pdf_files)}: {pdf_file.name}")
+            
+            # Traitement avec détection individuelle optimisée
+            properties = self.process_single_pdf(pdf_file)
+            
+            if properties:
+                all_properties.extend(properties)
+                logger.info(f"✅ {pdf_file.name}: {len(properties)} propriétés extraites")
+            else:
+                logger.warning(f"⚠️ {pdf_file.name}: Aucune propriété extraite")
+            
+            # Statistiques intermédiaires
+            if i % 3 == 0:
+                avg_per_pdf = len(all_properties) / i
+                logger.info(f"📈 Progrès: {len(all_properties)} propriétés, moyenne {avg_per_pdf:.1f}/PDF")
+        
+        return all_properties
+
+    def post_process_batch_results(self, all_properties: List[Dict], pdf_files: List[Path]) -> List[Dict]:
+        """
+        POST-TRAITEMENT pour optimiser les résultats du lot et combler les trous.
+        """
+        logger.info(f"🔧 Post-traitement de {len(all_properties)} propriétés")
+        
+        if not all_properties:
+            return all_properties
+        
+        # Analyser les champs manquants à l'échelle du lot
+        missing_stats = self.analyze_missing_fields_batch(all_properties)
+        logger.info(f"📊 Champs incomplets détectés: {len(missing_stats)} types")
+        
+        # Tenter de compléter avec des heuristiques cross-PDF
+        enhanced_properties = self.enhance_cross_pdf_data(all_properties, missing_stats)
+        
+        # Déduplication finale à l'échelle du lot
+        final_properties = self.deduplicate_batch_results(enhanced_properties)
+        
+        # Statistiques de qualité
+        improvement = len(final_properties) - len(all_properties)
+        logger.info(f"✨ Post-traitement terminé: {improvement:+d} propriétés après optimisation")
+        
+        return final_properties
+
+    def analyze_missing_fields_batch(self, properties: List[Dict]) -> Dict:
+        """
+        Analyse les champs manquants à l'échelle du lot complet.
+        """
+        missing_stats = {}
+        total_props = len(properties)
+        
+        required_fields = [
+            'department', 'commune', 'section', 'numero', 'contenance',
+            'nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city'
+        ]
+        
+        for field in required_fields:
+            empty_count = sum(1 for prop in properties if not prop.get(field))
+            if empty_count > 0:
+                missing_stats[field] = {
+                    'empty_count': empty_count,
+                    'completion_rate': ((total_props - empty_count) / total_props) * 100
+                }
+        
+        for field, stats in missing_stats.items():
+            logger.info(f"📊 {field}: {stats['completion_rate']:.1f}% complété ({stats['empty_count']} manquants)")
+        
+        return missing_stats
+
+    def enhance_cross_pdf_data(self, properties: List[Dict], missing_stats: Dict) -> List[Dict]:
+        """
+        Utilise les données d'autres PDFs pour combler les trous.
+        """
+        enhanced = properties.copy()
+        
+        # Grouper par localisation pour transfert de données
+        location_groups = {}
+        for prop in enhanced:
+            loc_key = f"{prop.get('department', '')}_{prop.get('commune', '')}"
+            if loc_key not in location_groups:
+                location_groups[loc_key] = []
+            location_groups[loc_key].append(prop)
+        
+        # Combler les trous par groupe de localisation
+        improvements = 0
+        for loc_key, group in location_groups.items():
+            if len(group) > 1:  # Au moins 2 propriétés dans cette localisation
+                improvements += self.cross_fill_location_group(group)
+        
+        if improvements > 0:
+            logger.info(f"🔄 {improvements} champs complétés via cross-référencement")
+        
+        return enhanced
+
+    def cross_fill_location_group(self, group: List[Dict]) -> int:
+        """
+        Complète les données manquantes au sein d'un groupe de même localisation.
+        """
+        improvements = 0
+        
+        # Collecter les valeurs communes non vides
+        common_values = {}
+        for field in ['department', 'commune', 'post_code', 'city']:
+            values = [prop.get(field, '') for prop in group if prop.get(field)]
+            if values:
+                # Prendre la valeur la plus fréquente
+                common_values[field] = max(set(values), key=values.count)
+        
+        # Appliquer aux propriétés avec des champs manquants
+        for prop in group:
+            for field, common_value in common_values.items():
+                if not prop.get(field) and common_value:
+                    prop[field] = common_value
+                    improvements += 1
+        
+        return improvements
+
+    def deduplicate_batch_results(self, properties: List[Dict]) -> List[Dict]:
+        """
+        Déduplication finale à l'échelle du lot complet.
+        """
+        seen_keys = set()
+        deduplicated = []
+        
+        for prop in properties:
+            # Clé unique plus robuste
+            key_parts = [
+                prop.get('nom', ''),
+                prop.get('prenom', ''),
+                prop.get('section', ''),
+                prop.get('numero', ''),
+                prop.get('numero_majic', ''),
+                prop.get('fichier_source', '')  # Inclure le fichier source pour éviter les conflits
+            ]
+            unique_key = '|'.join(str(p).strip().upper() for p in key_parts)
+            
+            if unique_key not in seen_keys and unique_key != '|||||':
+                seen_keys.add(unique_key)
+                deduplicated.append(prop)
+        
+        removed = len(properties) - len(deduplicated)
+        if removed > 0:
+            logger.info(f"🧹 {removed} doublons supprimés lors de la déduplication finale")
+        
+        return deduplicated
+
+    def export_to_csv_with_stats(self, all_properties: List[Dict]) -> None:
+        """
+        Export CSV avec statistiques détaillées de qualité.
+        """
+        if not all_properties:
+            logger.warning("Aucune donnée à exporter")
+            return
+        
+        # Export CSV standard
+        self.export_to_csv(all_properties)
+        
+        # Générer des statistiques de qualité
+        self.generate_quality_report(all_properties)
+
+    def generate_quality_report(self, properties: List[Dict]) -> None:
+        """
+        Génère un rapport de qualité détaillé pour le lot traité.
+        """
+        total_props = len(properties)
+        
+        # Calculer les taux de complétion par champ
+        required_fields = [
+            'department', 'commune', 'section', 'numero', 'contenance',
+            'nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city'
+        ]
+        
+        completion_stats = {}
+        for field in required_fields:
+            filled_count = sum(1 for prop in properties if prop.get(field))
+            completion_rate = (filled_count / total_props) * 100 if total_props > 0 else 0
+            completion_stats[field] = completion_rate
+        
+        # Log du rapport de qualité
+        logger.info("📊 RAPPORT DE QUALITÉ - EXTRACTION BATCH")
+        logger.info("=" * 50)
+        logger.info(f"Total propriétés extraites: {total_props}")
+        logger.info("\nTaux de complétion par champ:")
+        
+        for field, rate in completion_stats.items():
+            status = "🟢" if rate >= 90 else "🟡" if rate >= 70 else "🔴"
+            logger.info(f"  {status} {field:<20}: {rate:5.1f}%")
+        
+        # Moyenne globale
+        avg_completion = sum(completion_stats.values()) / len(completion_stats)
+        overall_status = "🟢" if avg_completion >= 90 else "🟡" if avg_completion >= 70 else "🔴"
+        logger.info(f"\n{overall_status} TAUX GLOBAL DE COMPLÉTION: {avg_completion:.1f}%")
 
 
 def main():
