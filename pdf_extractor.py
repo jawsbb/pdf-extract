@@ -138,42 +138,41 @@ class PDFPropertyExtractor:
             # Encoder l'image en base64
             base64_image = base64.b64encode(image_data).decode('utf-8')
             
-            # Prompt simple et efficace inspiré de Make.com
+            # Prompt simple et efficace - retour aux bases
             prompt = """
-IMPORTANT: You are an expert French cadastral document analyzer. Your job is to extract ALL visible information with maximum precision. Avoid "N/A" whenever possible by looking carefully at ALL parts of the document.
+Analyze this French cadastral document and extract ALL property owner information you can see.
 
-In this French cadastral document, extract information for ALL property owners including: nom, prenom, adresse, droit reel, numero proprietaire, department, commune, section, numero, contenance, designation parcelle.
+Look for:
+- Owner names (nom/prénom)
+- Property details (section, numero, contenance)
+- Addresses and postal codes
+- MAJIC codes (like M8BNF6)
+- Department/commune codes
+- Rights (droit réel like PP, US, NU)
 
-SEARCH STRATEGY:
-1. Look at document headers for department/commune codes
-2. Look for reference numbers like "51179 ZY 6" (department 51, commune 179, section ZY, number 6)  
-3. Scan entire document for owner names and addresses
-4. Check for MAJIC codes (alphanumeric like M8BNF6)
-5. If you see partial information, include it - don't use N/A
-
-OUTPUT FORMAT (use this exact structure):
+Return JSON with this structure:
 {
   "proprietes": [
     {
-      "department": "51",
-      "commune": "179", 
+      "department": "",
+      "commune": "",
       "prefixe": "",
-      "section": "ZY",
-      "numero": "0006",
-      "contenance": "230040",
-      "droit_reel": "US",
-      "designation_parcelle": "LES ROULLIERS",
-      "nom": "LAMBIN",
-      "prenom": "DIDIER JEAN GUY",
-      "numero_majic": "M8BNF6",
-      "voie": "1 RUE D AVAT",
-      "post_code": "51240",
-      "city": "COUPEVILLE"
+      "section": "",
+      "numero": "",
+      "contenance": "",
+      "droit_reel": "",
+      "designation_parcelle": "",
+      "nom": "",
+      "prenom": "",
+      "numero_majic": "",
+      "voie": "",
+      "post_code": "",
+      "city": ""
     }
   ]
 }
 
-CRITICAL: Extract ALL visible owners and properties. Look very carefully. Use empty string "" instead of N/A when information is truly missing. Be thorough - this document contains valuable data that must be extracted accurately.
+Extract ALL visible information. If something is not visible, use empty string "".
 """
             
             response = self.client.chat.completions.create(
@@ -217,95 +216,10 @@ CRITICAL: Extract ALL visible owners and properties. Look very carefully. Use em
             except json.JSONDecodeError as e:
                 logger.error(f"Erreur de parsing JSON pour {filename}: {e}")
                 logger.error(f"Réponse reçue: {response_text[:500]}...")
-                
-                # Tentative de récupération avec extraction simplifiée
-                logger.info(f"Tentative de récupération pour {filename}")
-                return self.fallback_extraction(image_data, filename)
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de l'extraction GPT-4o pour {filename}: {e}")
-            return None
-
-    def fallback_extraction(self, image_data: bytes, filename: str) -> Optional[Dict]:
-        """Extraction de secours avec prompt simplifié"""
-        try:
-            base64_image = base64.b64encode(image_data).decode('utf-8')
-            
-            # Prompt simplifié pour la récupération
-            simple_prompt = """
-Extract property owners from this French cadastral document.
-
-Return JSON format:
-{
-  "proprietes": [
-    {
-      "department": "dept code",
-      "commune": "commune code",
-      "section": "section",
-      "numero": "number",
-      "contenance": "surface",
-      "droit_reel": "PP/US/NU",
-      "designation_parcelle": "place name",
-      "nom": "last name",
-      "prenom": "first name", 
-      "numero_majic": "MAJIC code",
-      "voie": "address",
-      "post_code": "postal code",
-      "city": "city"
-    }
-  ]
-}
-
-Extract all visible information. Use "N/A" if not available.
-"""
-            
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": simple_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}",
-                                    "detail": "high"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=1500,
-                temperature=0.1
-            )
-            
-            response_text = response.choices[0].message.content.strip()
-            
-            # Nettoyage du JSON
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].strip()
-            
-            result = json.loads(response_text)
-            if "proprietes" in result and result["proprietes"]:
-                # Compléter les champs manquants avec "N/A"
-                for prop in result["proprietes"]:
-                    for field in ["department", "commune", "prefixe", "section", "numero", "contenance", 
-                                "droit_reel", "designation_parcelle", "nom", "prenom", "numero_majic", 
-                                "voie", "post_code", "city"]:
-                        if field not in prop:
-                            prop[field] = "N/A"
-                
-                logger.info(f"✅ Récupération réussie pour {filename}: {len(result['proprietes'])} propriété(s)")
-                return result
-            else:
-                logger.warning(f"❌ Récupération échouée pour {filename}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Erreur lors de la récupération pour {filename}: {e}")
+            logger.error(f"Erreur lors de l'extraction GPT-4o pour {filename}: {e}")
             return None
 
     def generate_parcel_id(self, department: str, commune: str, section: str = None, plan_number: int = None) -> str:
@@ -418,400 +332,10 @@ Extract all visible information. Use "N/A" if not available.
         
         return unique_id
 
-    def improve_extracted_data(self, properties: List[Dict], filename: str) -> List[Dict]:
-        """
-        Améliore intelligemment les données extraites en comblant les manques.
-        
-        Args:
-            properties: Liste des propriétés extraites
-            filename: Nom du fichier pour le contexte
-            
-        Returns:
-            Liste des propriétés améliorées
-        """
-        if not properties:
-            return []
-        
-        improved = []
-        
-        # Analyser les données pour trouver des patterns communs
-        common_dept = None
-        common_commune = None
-        
-        # Chercher les valeurs les plus fréquentes non-N/A
-        depts = [p.get('department') for p in properties if p.get('department') and p.get('department') != 'N/A']
-        communes = [p.get('commune') for p in properties if p.get('commune') and p.get('commune') != 'N/A']
-        
-        if depts:
-            common_dept = max(set(depts), key=depts.count)
-        if communes:
-            common_commune = max(set(communes), key=communes.count)
-        
-        # Si pas de dept/commune trouvés, essayer de déduire depuis les codes postaux
-        if not common_dept:
-            postcodes = [p.get('post_code') for p in properties if p.get('post_code') and p.get('post_code') != 'N/A']
-            if postcodes:
-                # Extraire le département depuis le code postal (2 premiers chiffres)
-                for pc in postcodes:
-                    if len(str(pc)) >= 2 and str(pc)[:2].isdigit():
-                        dept_from_pc = str(pc)[:2]
-                        if not common_dept:
-                            common_dept = dept_from_pc
-                            logger.info(f"Département déduit du code postal {pc}: {dept_from_pc}")
-                            break
-        
-        # Si toujours pas de département, essayer des heuristiques basées sur le filename
-        if not common_dept:
-            # Recherche de patterns dans le nom de fichier (ex: ZY 6 -> peut-être section ZY)
-            if 'ZY' in filename.upper():
-                # Heuristique : fichiers ZY souvent dans certains départements
-                # On peut essayer 51 (Marne) qui apparaît souvent avec ZY
-                common_dept = '51'
-                logger.info(f"Département deviné depuis filename {filename}: 51 (heuristique ZY)")
-        
-        logger.info(f"Amélioration pour {filename} - Dept commun: {common_dept}, Commune commune: {common_commune}")
-        
-        for prop in properties:
-            improved_prop = prop.copy()
-            
-            # Améliorer département/commune si manquants
-            if improved_prop.get('department') == 'N/A' and common_dept:
-                improved_prop['department'] = common_dept
-                
-            if improved_prop.get('commune') == 'N/A' and common_commune:
-                improved_prop['commune'] = common_commune
-            
-            # Nettoyer et normaliser les numéros de parcelles
-            numero = improved_prop.get('numero', 'N/A')
-            if numero and numero != 'N/A':
-                # Enlever les espaces et normaliser
-                numero_clean = str(numero).replace(' ', '').strip()
-                if numero_clean.isdigit():
-                    improved_prop['numero'] = numero_clean.zfill(4)
-            
-            # Nettoyer la contenance (enlever les espaces, normaliser)
-            contenance = improved_prop.get('contenance', 'N/A')
-            if contenance and contenance != 'N/A':
-                # Enlever tous les espaces
-                contenance_clean = str(contenance).replace(' ', '').strip()
-                
-                # Convertir "23 HA 40 A" en format numérique
-                if 'HA' in str(contenance).upper():
-                    try:
-                        parts = str(contenance).upper().replace('A', '').replace('HA', '').strip().split()
-                        if len(parts) >= 2:
-                            ha = int(parts[0]) if parts[0].isdigit() else 0
-                            a = int(parts[1]) if parts[1].isdigit() else 0
-                            # Format: HHAAAA (2 chiffres HA + 4 chiffres A)
-                            improved_prop['contenance'] = f"{ha:02d}{a:04d}0"
-                    except:
-                        # Si échec, garder la version nettoyée
-                        improved_prop['contenance'] = contenance_clean
-                else:
-                    # Juste nettoyer les espaces
-                    improved_prop['contenance'] = contenance_clean
-            
-            # Normaliser les droits réels
-            droit = str(improved_prop.get('droit_reel', 'N/A')).upper()
-            if 'PROPRIET' in droit and droit != 'PP':
-                improved_prop['droit_reel'] = 'PP'
-            elif 'USUFRUIT' in droit and droit != 'US':
-                improved_prop['droit_reel'] = 'US'
-            elif 'NU-PROPRIET' in droit or 'NUE-PROPRIET' in droit:
-                improved_prop['droit_reel'] = 'NU'
-            
-            # Nettoyer les codes postaux (enlever espaces)
-            if 'post_code' in improved_prop and improved_prop['post_code']:
-                pc = str(improved_prop['post_code']).replace(' ', '').strip()
-                if pc.isdigit() and len(pc) == 5:
-                    improved_prop['post_code'] = pc
-            
-            # Ignorer les propriétés complètement vides (que des N/A)
-            essential_fields = ['nom', 'prenom', 'section']
-            if all(improved_prop.get(field) in ['N/A', None, ''] for field in essential_fields):
-                logger.warning(f"Propriété ignorée car trop incomplète dans {filename}")
-                continue
-            
-            improved.append(improved_prop)
-        
-        logger.info(f"Amélioration terminée: {len(properties)} → {len(improved)} propriété(s) pour {filename}")
-        return improved
-
-    def conservative_na_recovery(self, properties: List[Dict], filename: str) -> List[Dict]:
-        """
-        Récupération conservatrice des N/A - SEULEMENT si très confiant.
-        Préserve la précision en étant très prudent.
-        """
-        if not properties:
-            return []
-        
-        logger.info(f"🔍 Récupération conservatrice pour {filename}")
-        
-        # Analyser les patterns CONFIRMÉS uniquement
-        confirmed_depts = [p.get('department') for p in properties 
-                          if p.get('department') and p.get('department') != 'N/A']
-        confirmed_communes = [p.get('commune') for p in properties 
-                             if p.get('commune') and p.get('commune') != 'N/A']
-        
-        best_dept = None
-        best_commune = None
-        
-        # Récupération département
-        if confirmed_depts:
-            # Seulement si >60% des propriétés ont le même département
-            dept_counts = {}
-            for d in confirmed_depts:
-                dept_counts[d] = dept_counts.get(d, 0) + 1
-            total_props = len([p for p in properties if p.get('nom') != 'N/A'])
-            if total_props > 0:
-                most_common_dept, count = max(dept_counts.items(), key=lambda x: x[1])
-                if count > total_props * 0.6:  # 60% minimum
-                    best_dept = most_common_dept
-                    logger.info(f"✅ Département dominant détecté: {best_dept} ({count}/{total_props})")
-        
-        # Récupération commune
-        if confirmed_communes:
-            commune_counts = {}
-            for c in confirmed_communes:
-                commune_counts[c] = commune_counts.get(c, 0) + 1
-            if commune_counts:
-                most_common_commune, count = max(commune_counts.items(), key=lambda x: x[1])
-                if count >= 2:  # Au moins 2 occurrences
-                    best_commune = most_common_commune
-                    logger.info(f"✅ Commune dominante détectée: {best_commune} ({count} occurrences)")
-        
-        # Récupération PRUDENTE depuis codes postaux (seulement si pas de département/commune trouvé)
-        if not best_dept or not best_commune:
-            postcodes = [p.get('post_code') for p in properties 
-                        if p.get('post_code') and p.get('post_code') != 'N/A']
-            if len(postcodes) >= 2:
-                pc_info = {}
-                for pc in postcodes:
-                    if len(str(pc)) >= 2 and str(pc)[:2].isdigit():
-                        dept = str(pc)[:2]
-                        pc_info[dept] = pc_info.get(dept, 0) + 1
-                
-                if pc_info and not best_dept:
-                    most_common_pc_dept, count = max(pc_info.items(), key=lambda x: x[1])
-                    if count >= 2:  # Au moins 2 occurrences identiques
-                        best_dept = most_common_pc_dept
-                        logger.info(f"✅ Département déduit PRUDEMMENT des CP: {best_dept} ({count} occurrences)")
-        
-        # Application conservatrice
-        recovered = []
-        dept_applied = 0
-        commune_applied = 0
-        
-        for prop in properties:
-            new_prop = prop.copy()
-            
-            # Application SEULEMENT si très confiant ET c'est un vrai propriétaire
-            if new_prop.get('nom') != 'N/A' and new_prop.get('prenom') != 'N/A':
-                
-                # Appliquer département
-                if new_prop.get('department') == 'N/A' and best_dept:
-                    new_prop['department'] = best_dept
-                    dept_applied += 1
-                
-                # Appliquer commune (seulement si on a déjà un département valide)
-                if (new_prop.get('commune') == 'N/A' and best_commune and 
-                    new_prop.get('department') != 'N/A'):
-                    new_prop['commune'] = best_commune
-                    commune_applied += 1
-            
-            recovered.append(new_prop)
-        
-        if dept_applied > 0 or commune_applied > 0:
-            logger.info(f"✅ Appliqué: {dept_applied} département(s), {commune_applied} commune(s)")
-        else:
-            logger.info(f"⚠️  Aucune récupération appliquée - précision préservée")
-        
-        return recovered
-
-    def multi_pass_extraction(self, properties: List[Dict], image_data: bytes, filename: str) -> List[Dict]:
-        """
-        Extraction multi-passes pour récupérer les N/A restants.
-        Fait plusieurs tentatives avec des prompts différents.
-        """
-        if not properties:
-            return []
-        
-        # Compter les N/A initiaux
-        initial_na_count = sum(1 for prop in properties for field, value in prop.items() 
-                              if value in ['N/A', '', None])
-        
-        if initial_na_count == 0:
-            logger.info(f"✅ Aucun N/A détecté pour {filename} - extraction complète")
-            return properties
-            
-        logger.info(f"🔄 Multi-pass extraction pour {filename} - {initial_na_count} N/A à récupérer")
-        
-        # Pass 2: Focus sur les départements/communes manquants
-        if any(prop.get('department') in ['N/A', '', None] or prop.get('commune') in ['N/A', '', None] 
-               for prop in properties):
-            
-            try:
-                base64_image = base64.b64encode(image_data).decode('utf-8')
-                location_prompt = """
-Look at this French cadastral document and find ONLY the department and commune codes.
-
-Look for:
-- Header information with department/commune numbers
-- Reference codes like "51179" (department 51, commune 179)
-- Municipality names that could indicate location
-
-Return ONLY the codes in this format:
-{
-  "department": "XX",
-  "commune": "XXX"
-}
-
-Be very thorough. These codes are usually at the top of the document.
-"""
-                
-                response = self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": location_prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}",
-                                        "detail": "high"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    max_tokens=500,
-                    temperature=0.0
-                )
-                
-                response_text = response.choices[0].message.content.strip()
-                if "```json" in response_text:
-                    response_text = response_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in response_text:
-                    response_text = response_text.split("```")[1].strip()
-                
-                location_data = json.loads(response_text)
-                found_dept = location_data.get('department')
-                found_commune = location_data.get('commune')
-                
-                # Appliquer aux propriétés manquantes
-                applied_count = 0
-                for prop in properties:
-                    if prop.get('department') in ['N/A', '', None] and found_dept:
-                        prop['department'] = found_dept
-                        applied_count += 1
-                    if prop.get('commune') in ['N/A', '', None] and found_commune:
-                        prop['commune'] = found_commune
-                        applied_count += 1
-                
-                if applied_count > 0:
-                    logger.info(f"✅ Pass 2: Récupéré {applied_count} département/commune pour {filename}")
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ Pass 2 échoué pour {filename}: {e}")
-        
-        # Pass 3: Focus sur les propriétaires manquants
-        missing_owners = [i for i, prop in enumerate(properties) 
-                         if prop.get('nom') in ['N/A', '', None] or prop.get('prenom') in ['N/A', '', None]]
-        
-        if missing_owners:
-            try:
-                base64_image = base64.b64encode(image_data).decode('utf-8')
-                owner_prompt = """
-Look at this French cadastral document and find ALL property owner names.
-
-Focus on finding:
-- Last names (NOM) and first names (PRENOM)
-- MAJIC codes (like M8BNF6, MB43HC)
-- Addresses of owners
-- Any owner information in tables or lists
-
-Return ALL owners you can find:
-{
-  "owners": [
-    {
-      "nom": "LASTNAME",
-      "prenom": "FIRSTNAME", 
-      "numero_majic": "MAJIC_CODE",
-      "voie": "ADDRESS",
-      "post_code": "POSTAL",
-      "city": "CITY"
-    }
-  ]
-}
-
-Be extremely thorough. Look everywhere for owner information.
-"""
-                
-                response = self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": owner_prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}",
-                                        "detail": "high"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    max_tokens=2000,
-                    temperature=0.0
-                )
-                
-                response_text = response.choices[0].message.content.strip()
-                if "```json" in response_text:
-                    response_text = response_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in response_text:
-                    response_text = response_text.split("```")[1].strip()
-                
-                owner_data = json.loads(response_text)
-                found_owners = owner_data.get('owners', [])
-                
-                # Fusionner avec les propriétés existantes
-                applied_count = 0
-                for i, missing_idx in enumerate(missing_owners):
-                    if i < len(found_owners):
-                        owner = found_owners[i]
-                        prop = properties[missing_idx]
-                        
-                        for field in ['nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city']:
-                            if prop.get(field) in ['N/A', '', None] and owner.get(field):
-                                prop[field] = owner[field]
-                                applied_count += 1
-                
-                if applied_count > 0:
-                    logger.info(f"✅ Pass 3: Récupéré {applied_count} infos propriétaires pour {filename}")
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ Pass 3 échoué pour {filename}: {e}")
-        
-        # Bilan final
-        final_na_count = sum(1 for prop in properties for field, value in prop.items() 
-                            if value in ['N/A', '', None])
-        recovered = initial_na_count - final_na_count
-        
-        if recovered > 0:
-            logger.info(f"🎯 Multi-pass terminé pour {filename}: {recovered} N/A récupérés sur {initial_na_count}")
-        else:
-            logger.info(f"⚠️ Multi-pass terminé pour {filename}: aucun N/A supplémentaire récupéré")
-        
-        return properties
-
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un seul fichier PDF et retourne les informations extraites.
+        VERSION SIMPLIFIÉE - suppression de toutes les couches complexes
         
         Args:
             pdf_path: Chemin vers le fichier PDF
@@ -828,263 +352,29 @@ Be extremely thorough. Look everywhere for owner information.
             return []
         
         # Extraire les informations avec GPT-4o pour chaque page
-        all_page_data = []
+        all_properties = []
         for page_num, image_data in enumerate(images, 1):
             logger.info(f"Extraction des données de la page {page_num}/{len(images)} pour {pdf_path.name}")
             extracted_data = self.extract_info_with_gpt4o(image_data, f"{pdf_path.name} (page {page_num})")
             if extracted_data and 'proprietes' in extracted_data:
-                # Ajouter le numéro de page à chaque propriété pour le suivi
                 for prop in extracted_data['proprietes']:
-                    prop['_source_page'] = page_num
-                all_page_data.append({
-                    'page': page_num,
-                    'data': extracted_data['proprietes']
-                })
-            elif extracted_data is None:
-                logger.warning(f"❌ Échec de l'extraction pour la page {page_num} de {pdf_path.name}")
+                    # Générer l'ID unique
+                    unique_id = self.generate_unique_id(
+                        department=prop.get('department', '00'),
+                        commune=prop.get('commune', '000'),
+                        section=prop.get('section', 'A'),
+                        numero=prop.get('numero', '0000'),
+                        prefixe=prop.get('prefixe', '')
+                    )
+                    
+                    # Ajouter l'ID unique et le fichier source
+                    prop['id'] = unique_id
+                    prop['fichier_source'] = pdf_path.name
+                    
+                    all_properties.append(prop)
         
-        if not all_page_data:
-            logger.error(f"❌ Aucune donnée extraite pour {pdf_path.name}")
-            return []
-        
-        # Combiner intelligemment les données des pages
-        combined_properties = self.combine_multi_page_data(all_page_data, pdf_path.name)
-        
-        # Améliorer les données extraites
-        improved_properties = self.improve_extracted_data(combined_properties, pdf_path.name)
-        
-        # Récupérer la récupération conservatrice
-        recovered_properties = self.conservative_na_recovery(improved_properties, pdf_path.name)
-        
-        # Récupérer les N/A restants avec extraction multi-passes
-        if images:
-            final_properties = self.multi_pass_extraction(recovered_properties, images[0], pdf_path.name)
-        else:
-            final_properties = recovered_properties
-        
-        # Traiter chaque propriété combinée
-        processed_properties = []
-        for property_data in final_properties:
-            # Générer l'ID unique avec les nouvelles colonnes
-            unique_id = self.generate_unique_id(
-                department=property_data.get('department', '00'),
-                commune=property_data.get('commune', '000'),
-                section=property_data.get('section', 'A'),
-                numero=property_data.get('numero', '0000'),
-                prefixe=property_data.get('prefixe', '')
-            )
-            
-            # Ajouter l'ID unique et le fichier source
-            property_data['id'] = unique_id
-            property_data['fichier_source'] = pdf_path.name
-            
-            # Nettoyer les champs techniques
-            property_data.pop('_source_page', None)
-            
-            processed_properties.append(property_data)
-        
-        logger.info(f"✅ {pdf_path.name} traité avec succès - {len(processed_properties)} propriété(s)")
-        return processed_properties
-
-    def combine_multi_page_data(self, all_page_data: List[Dict], filename: str) -> List[Dict]:
-        """
-        Combine intelligemment les données de plusieurs pages.
-        
-        Args:
-            all_page_data: Liste des données extraites par page
-            filename: Nom du fichier pour le logging
-            
-        Returns:
-            Liste des propriétés combinées
-        """
-        if len(all_page_data) == 1:
-            # Une seule page, retourner directement
-            return all_page_data[0]['data']
-        
-        # Analyser le contenu de chaque page
-        owner_pages = []  # Pages avec principalement des infos propriétaires
-        property_pages = []  # Pages avec principalement des infos parcelles
-        complete_pages = []  # Pages avec infos complètes
-        
-        for page_info in all_page_data:
-            page_num = page_info['page']
-            properties = page_info['data']
-            
-            # Analyser chaque propriété de la page
-            owner_info_count = 0
-            property_info_count = 0
-            complete_count = 0
-            
-            for prop in properties:
-                has_owner_info = self.has_complete_owner_info(prop)
-                has_property_info = self.has_complete_property_info(prop)
-                
-                if has_owner_info and has_property_info:
-                    complete_count += 1
-                elif has_owner_info:
-                    owner_info_count += 1
-                elif has_property_info:
-                    property_info_count += 1
-            
-            # Classifier la page
-            if complete_count > 0:
-                complete_pages.append(page_info)
-                logger.info(f"Page {page_num} de {filename}: {complete_count} propriété(s) complète(s)")
-            elif owner_info_count > property_info_count:
-                owner_pages.append(page_info)
-                logger.info(f"Page {page_num} de {filename}: principalement des infos propriétaires ({owner_info_count})")
-            elif property_info_count > owner_info_count:
-                property_pages.append(page_info)
-                logger.info(f"Page {page_num} de {filename}: principalement des infos parcelles ({property_info_count})")
-            else:
-                complete_pages.append(page_info)
-                logger.info(f"Page {page_num} de {filename}: contenu mixte")
-        
-        # Stratégie de combinaison
-        if complete_pages:
-            # Si on a des pages complètes, les utiliser en priorité
-            combined = []
-            for page_info in complete_pages:
-                combined.extend(page_info['data'])
-            
-            # Ajouter les données des autres pages si elles apportent des infos supplémentaires
-            if owner_pages or property_pages:
-                combined.extend(self.merge_incomplete_pages(owner_pages, property_pages, filename))
-            
-            return combined
-        
-        elif owner_pages and property_pages:
-            # Combiner les pages d'infos propriétaires avec les pages d'infos parcelles
-            logger.info(f"Combinaison des pages séparées pour {filename}")
-            return self.merge_incomplete_pages(owner_pages, property_pages, filename)
-        
-        else:
-            # Fallback : combiner toutes les données
-            combined = []
-            for page_info in all_page_data:
-                combined.extend(page_info['data'])
-            return combined
-
-    def has_complete_owner_info(self, prop: Dict) -> bool:
-        """Vérifie si une propriété a des informations complètes sur le propriétaire."""
-        required_fields = ['nom', 'prenom']
-        optional_fields = ['voie', 'post_code', 'city', 'numero_majic']
-        
-        # Au moins les champs requis
-        has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
-        
-        # Au moins un champ optionnel
-        has_optional = any(prop.get(field, 'N/A') not in ['N/A', '', None] for field in optional_fields)
-        
-        return has_required and has_optional
-
-    def has_complete_property_info(self, prop: Dict) -> bool:
-        """Vérifie si une propriété a des informations complètes sur la parcelle."""
-        required_fields = ['section', 'numero']
-        optional_fields = ['department', 'commune', 'contenance', 'designation_parcelle']
-        
-        # Au moins les champs requis
-        has_required = all(prop.get(field, 'N/A') not in ['N/A', '', None] for field in required_fields)
-        
-        # Au moins un champ optionnel
-        has_optional = any(prop.get(field, 'N/A') not in ['N/A', '', None] for field in optional_fields)
-        
-        return has_required and has_optional
-
-    def merge_incomplete_pages(self, owner_pages: List[Dict], property_pages: List[Dict], filename: str) -> List[Dict]:
-        """
-        Fusionne les pages avec infos propriétaires et les pages avec infos parcelles.
-        
-        Args:
-            owner_pages: Pages avec infos propriétaires
-            property_pages: Pages avec infos parcelles
-            filename: Nom du fichier pour le logging
-            
-        Returns:
-            Liste des propriétés fusionnées
-        """
-        if not owner_pages or not property_pages:
-            # Si on n'a qu'un type, retourner tout
-            all_data = []
-            for page_info in owner_pages + property_pages:
-                all_data.extend(page_info['data'])
-            return all_data
-        
-        # Extraire les données
-        owners = []
-        properties = []
-        
-        for page_info in owner_pages:
-            owners.extend(page_info['data'])
-        
-        for page_info in property_pages:
-            properties.extend(page_info['data'])
-        
-        logger.info(f"Fusion de {len(owners)} propriétaire(s) avec {len(properties)} parcelle(s) pour {filename}")
-        
-        # Stratégie de fusion
-        merged = []
-        
-        if len(owners) == 1 and len(properties) >= 1:
-            # Un propriétaire, plusieurs parcelles
-            owner = owners[0]
-            for prop in properties:
-                merged_prop = self.merge_owner_and_property(owner, prop)
-                merged.append(merged_prop)
-        
-        elif len(owners) >= 1 and len(properties) == 1:
-            # Plusieurs propriétaires, une parcelle (rare mais possible)
-            prop = properties[0]
-            for owner in owners:
-                merged_prop = self.merge_owner_and_property(owner, prop)
-                merged.append(merged_prop)
-        
-        elif len(owners) == len(properties):
-            # Même nombre, fusion 1:1
-            for i in range(len(owners)):
-                merged_prop = self.merge_owner_and_property(owners[i], properties[i])
-                merged.append(merged_prop)
-        
-        else:
-            # Cas complexe : essayer de faire correspondre intelligemment
-            logger.warning(f"Cas complexe de fusion pour {filename}: {len(owners)} propriétaires, {len(properties)} parcelles")
-            
-            # Stratégie : chaque propriétaire avec chaque parcelle
-            for owner in owners:
-                for prop in properties:
-                    merged_prop = self.merge_owner_and_property(owner, prop)
-                    merged.append(merged_prop)
-        
-        logger.info(f"Fusion terminée: {len(merged)} propriété(s) créée(s)")
-        return merged
-
-    def merge_owner_and_property(self, owner: Dict, prop: Dict) -> Dict:
-        """
-        Fusionne les informations d'un propriétaire avec celles d'une propriété.
-        
-        Args:
-            owner: Données du propriétaire
-            prop: Données de la propriété
-            
-        Returns:
-            Propriété fusionnée
-        """
-        merged = {}
-        
-        # Priorité aux infos propriétaire pour les champs propriétaire
-        owner_fields = ['nom', 'prenom', 'adresse_proprietaire', 'post_code', 'city', 'numero_proprietaire']
-        for field in owner_fields:
-            merged[field] = owner.get(field, prop.get(field, 'N/A'))
-        
-        # Priorité aux infos propriété pour les champs propriété
-        property_fields = ['section', 'numero_plan', 'street_address', 'contenance', 'droit_reel', 'department', 'commune', 'HA', 'A', 'CA']
-        for field in property_fields:
-            merged[field] = prop.get(field, owner.get(field, 'N/A'))
-        
-        # Garder la source de page pour le debug
-        merged['_source_page'] = f"{owner.get('_source_page', '?')},{prop.get('_source_page', '?')}"
-        
-        return merged
+        logger.info(f"✅ {pdf_path.name} traité avec succès - {len(all_properties)} propriété(s)")
+        return all_properties
 
     def export_to_csv(self, all_properties: List[Dict], output_filename: str = "output.csv") -> None:
         """
@@ -1101,38 +391,35 @@ Be extremely thorough. Look everywhere for owner information.
         # Créer le DataFrame
         df = pd.DataFrame(all_properties)
         
-        # Réorganiser les colonnes selon les spécifications
+        # Colonnes selon les spécifications du client
         columns_order = [
-            'nom', 'prenom', 'adresse_proprietaire', 'post_code', 'city',
-            'department', 'commune', 'numero_proprietaire', 'droit_reel',
-            'section', 'numero_plan', 'street_address',
-            'contenance', 'HA', 'A', 'CA', 'id_parcelle', 'fichier_source'
+            'department', 'commune', 'prefixe', 'section', 'numero', 'contenance', 
+            'droit_reel', 'designation_parcelle', 'nom', 'prenom', 'numero_majic', 
+            'voie', 'post_code', 'city', 'id', 'fichier_source'
         ]
         
         # Renommer les colonnes pour plus de clarté
         column_mapping = {
-            'nom': 'Nom',
-            'prenom': 'Prénom',
-            'adresse_proprietaire': 'Adresse Propriétaire',
+            'department': 'Département',
+            'commune': 'Commune', 
+            'prefixe': 'Préfixe',
+            'section': 'Section',
+            'numero': 'Numéro',
+            'contenance': 'Contenance',
+            'droit_reel': 'Droit réel',
+            'designation_parcelle': 'Designation Parcelle',
+            'nom': 'Nom Propri',
+            'prenom': 'Prénom Propri',
+            'numero_majic': 'N°MAJIC',
+            'voie': 'Voie',
             'post_code': 'CP',
             'city': 'Ville',
-            'department': 'Département',
-            'commune': 'Commune',
-            'numero_proprietaire': 'Numéro MAJIC',
-            'droit_reel': 'Droit réel',
-            'section': 'Section',
-            'numero_plan': 'N° Plan',
-            'street_address': 'Adresse Propriété',
-            'contenance': 'Contenance',
-            'HA': 'Hectares',
-            'A': 'Ares',
-            'CA': 'Centiares',
-            'id_parcelle': 'ID Parcelle',
+            'id': 'id',
             'fichier_source': 'Fichier source'
         }
         
         # Réorganiser et renommer
-        df = df.reindex(columns=columns_order, fill_value='N/A')
+        df = df.reindex(columns=columns_order, fill_value='')
         df = df.rename(columns=column_mapping)
         
         # Exporter
@@ -1141,6 +428,8 @@ Be extremely thorough. Look everywhere for owner information.
         
         logger.info(f"📊 Données exportées vers {output_path}")
         logger.info(f"📈 Total: {len(all_properties)} propriété(s) dans {len(df['Fichier source'].unique())} fichier(s)")
+        
+        return output_path
 
     def run(self) -> None:
         """
