@@ -943,6 +943,7 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 8. Collecte TOUTES les informations visibles
 9. Regroupe intelligemment les données dispersées
 10. Ne laisse RIEN passer, même les valeurs partielles
+11. Le champ `prefixe` est indiqué avant la désignation du lieu-dit dans la section 'Propriété(s) non bâtie(s)' (ex : ZY 8, ZY 6, etc.)
 
 ⚠️ RÈGLES STRICTES:
 - ADAPTE ta lecture au format détecté
@@ -957,7 +958,7 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
     {{
       "department": "",
       "commune": "",
-      "prefixe": "",
+      "prefixe": "ZY",
       "section": "",
       "numero": "",
       "contenance": "",
@@ -974,6 +975,26 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 }}
 """
         return adapted_prompt
+
+    def propagate_values_downward(self, properties: List[Dict], fields: List[str]) -> List[Dict]:
+        """
+        Propage les valeurs des champs spécifiés vers le bas si elles sont vides.
+        Mémorise la dernière valeur vue pour chaque champ et la propage.
+        """
+        last_seen_values = {field: None for field in fields}
+        
+        updated_properties = []
+        for prop in properties:
+            updated_prop = prop.copy()
+            for field in fields:
+                if updated_prop.get(field) is None or updated_prop.get(field) == "":
+                    if last_seen_values[field] is not None:
+                        updated_prop[field] = last_seen_values[field]
+                else:
+                    last_seen_values[field] = updated_prop[field]
+            updated_properties.append(updated_prop)
+            
+        return updated_properties
 
     def smart_merge_multi_page_data(self, all_page_data: List[Dict], filename: str) -> List[Dict]:
         """
@@ -1070,6 +1091,9 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         
         # PHASE 3: Nettoyage et déduplication
         cleaned_properties = self.clean_and_deduplicate(merged_properties, filename)
+        
+        # Propager les valeurs de designation_parcelle et prefixe vers le bas
+        cleaned_properties = self.propagate_values_downward(cleaned_properties, ['designation_parcelle', 'prefixe'])
         
         logger.info(f"✨ Fusion terminée: {len(cleaned_properties)} propriétés finales")
         return cleaned_properties
