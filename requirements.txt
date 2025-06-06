@@ -1,6 +1,7 @@
 # Dépendances principales pour Streamlit
 streamlit>=1.28.0
 PyMuPDF>=1.23.0
+pdfplumber>=0.9.0
 openai>=1.0.0
 pandas>=2.0.0
 Pillow>=10.0.0

@@ -13,6 +13,7 @@ import base64
 from pathlib import Path
 from typing import List, Dict, Optional
 import fitz  # PyMuPDF
+import pdfplumber
 import pandas as pd
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -677,6 +678,452 @@ Retourne TOUT ce que tu vois en JSON:
         
         return unique_id
 
+    def extract_tables_with_pdfplumber(self, pdf_path: Path) -> Dict:
+        """
+        EXTRACTION HYBRIDE ÉTAPE 1: Extraction des tableaux structurés avec pdfplumber.
+        Réplique exactement l'approche du code Make/Python Anywhere.
+        """
+        logger.info(f"📋 Extraction tableaux pdfplumber pour {pdf_path.name}")
+        
+        try:
+            prop_batie = []
+            non_prop_batie = []
+            contenance_totale = {}
+            property_batie_in_new_page = False
+            
+            with pdfplumber.open(pdf_path) as pdf:
+                # Parcourir toutes les pages
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    for table in tables:
+                        if not table or not table[0]:
+                            continue
+                            
+                        # Détecter les tableaux de propriétés bâties
+                        if table[0][0] == 'Propriété(s) bâtie(s)':
+                            logger.info(f"📊 Trouvé tableau propriétés bâties")
+                            property_batie_in_new_page = True
+                            prop_batie = self.extract_property_batie(table)
+                        
+                        # Détecter les tableaux de propriétés non bâties
+                        elif table[0][0] == 'Propriété(s) non bâtie(s)':
+                            logger.info(f"📊 Trouvé tableau propriétés non bâties")
+                            prop_non_batie_dict = self.extract_property_non_batie(table)
+                            non_prop_batie.extend(prop_non_batie_dict)
+                        
+                        # NOUVEAU: Détecter le tableau "Contenance totale"
+                        elif any(row and 'Contenance totale' in str(row[0]) for row in table if row):
+                            logger.info(f"🎯 Trouvé tableau Contenance totale")
+                            contenance_totale = self.extract_contenance_totale(table)
+                            # Appliquer les valeurs HA, A, CA aux propriétés déjà extraites
+                            if contenance_totale:
+                                self.apply_contenance_totale_to_properties(non_prop_batie, contenance_totale)
+                
+                # Fallback: chercher dans la première page si pas trouvé ailleurs
+                if not property_batie_in_new_page and pdf.pages:
+                    first_page_tables = pdf.pages[0].extract_tables()
+                    if first_page_tables:
+                        for idx, row in enumerate(first_page_tables[0]):
+                            if row and row[0] == 'Propriété(s) bâtie(s)':
+                                property_batie_table = first_page_tables[0][idx:]
+                                prop_batie = self.extract_property_batie(property_batie_table)
+            
+            logger.info(f"✅ pdfplumber: {len(prop_batie)} bâties, {len(non_prop_batie)} non bâties")
+            return {
+                "prop_batie": prop_batie,
+                "non_batie": non_prop_batie
+            }
+            
+        except Exception as e:
+            logger.error(f"Erreur pdfplumber pour {pdf_path.name}: {e}")
+            return {"prop_batie": [], "non_batie": []}
+
+    def extract_property_batie(self, table: List[List]) -> List[Dict]:
+        """Extraction des propriétés bâties (réplique du code Make)."""
+        if len(table) < 3:
+            return []
+            
+        property_rows = table[2:]
+        headers = property_rows[0]
+        clean_headers = [header.replace('\n', ' ').strip() if header is not None else '' for header in headers]
+        property_dicts = []
+
+        if len(property_rows) > 1 and property_rows[1] and "Total" not in str(property_rows[1][0]):
+            for row in property_rows[1:]:
+                if row and "Total" in str(row[0]):
+                    break
+                
+                property_dict = {
+                    clean_headers[i]: row[i] if i < len(row) else None 
+                    for i in range(len(clean_headers))
+                }
+                property_dicts.append(property_dict)
+        
+        return property_dicts
+
+    def extract_property_non_batie(self, table: List[List]) -> List[Dict]:
+        """Extraction des propriétés non bâties (réplique du code Make)."""
+        if len(table) < 3:
+            return []
+            
+        property_rows = table[2:]
+        headers = property_rows[0]
+        clean_headers = [header.replace('\n', ' ').strip() if header is not None else '' for header in headers]
+        property_dicts = []
+
+        # Chercher les en-têtes HA, A, CA supplémentaires
+        ha_pos = None
+        a_pos = None
+        ca_pos = None
+        
+        # Vérifier s'il y a une ligne avec HA, A, CA après les en-têtes principaux
+        for i, row in enumerate(property_rows):
+            if row:
+                for j, cell in enumerate(row):
+                    if cell == 'HA':
+                        ha_pos = j
+                    elif cell == 'A':
+                        a_pos = j
+                    elif cell == 'CA':
+                        ca_pos = j
+                
+                # Si on a trouvé HA, A, CA dans cette ligne
+                if ha_pos is not None and a_pos is not None and ca_pos is not None:
+                    logger.info(f"🎯 En-têtes HA/A/CA trouvés dans tableau non bâties aux positions {ha_pos}, {a_pos}, {ca_pos}")
+                    break
+
+        if len(property_rows) > 2 and property_rows[2] and "totale" not in str(property_rows[2][0]).lower():
+            for row in property_rows[2:]:
+                if row and "totale" in str(row[0]).lower():
+                    break
+                
+                property_dict = {
+                    clean_headers[i]: row[i] if i < len(row) else None 
+                    for i in range(len(clean_headers))
+                }
+                
+                # Ajouter les valeurs HA, A, CA si elles existent
+                if ha_pos is not None and ha_pos < len(row) and row[ha_pos]:
+                    property_dict['HA'] = str(row[ha_pos]).strip()
+                if a_pos is not None and a_pos < len(row) and row[a_pos]:
+                    property_dict['A'] = str(row[a_pos]).strip()
+                if ca_pos is not None and ca_pos < len(row) and row[ca_pos]:
+                    property_dict['CA'] = str(row[ca_pos]).strip()
+                
+                property_dicts.append(property_dict)
+        
+        return property_dicts
+
+    def extract_contenance_totale(self, table: List[List]) -> Dict:
+        """Extraction du tableau 'Contenance totale' avec colonnes HA, A, CA"""
+        try:
+            # Chercher les en-têtes HA, A, CA ET la ligne de données correspondante
+            contenance_data = {}
+            
+            for i, row in enumerate(table):
+                if not row:
+                    continue
+                    
+                # Chercher une ligne avec exactement HA, A, CA consécutifs
+                ha_pos = None
+                a_pos = None  
+                ca_pos = None
+                
+                for j, cell in enumerate(row):
+                    if cell == 'HA':
+                        ha_pos = j
+                    elif cell == 'A' and j > 0 and row[j-1] == 'HA':  # A juste après HA
+                        a_pos = j
+                    elif cell == 'CA' and j > 1 and row[j-1] == 'A' and row[j-2] == 'HA':  # CA après A après HA
+                        ca_pos = j
+                
+                # Si on a trouvé les trois colonnes consécutives
+                if ha_pos is not None and a_pos is not None and ca_pos is not None:
+                    logger.info(f"🎯 En-têtes HA/A/CA trouvés aux positions {ha_pos}, {a_pos}, {ca_pos}")
+                    
+                    # Chercher les données dans la même ligne ou les lignes suivantes
+                    for data_row_idx in range(i, min(i + 3, len(table))):  # Chercher dans les 3 lignes suivantes
+                        data_row = table[data_row_idx]
+                        if data_row and len(data_row) > ca_pos:
+                            # Vérifier si on a des valeurs numériques aux bonnes positions
+                            ha_val = str(data_row[ha_pos]).strip() if ha_pos < len(data_row) and data_row[ha_pos] else ''
+                            a_val = str(data_row[a_pos]).strip() if a_pos < len(data_row) and data_row[a_pos] else ''
+                            ca_val = str(data_row[ca_pos]).strip() if ca_pos < len(data_row) and data_row[ca_pos] else ''
+                            
+                            # Si au moins une valeur est numérique, on prend cette ligne
+                            if ha_val.isdigit() or a_val.isdigit() or ca_val.isdigit():
+                                contenance_data = {
+                                    'HA': ha_val,
+                                    'A': a_val, 
+                                    'CA': ca_val
+                                }
+                                logger.info(f"🎯 Contenance totale extraite: {contenance_data}")
+                                return contenance_data
+                    break  # On a trouvé les en-têtes, pas besoin de continuer
+            
+            if not contenance_data:
+                logger.warning("🎯 Tableau contenance totale détecté mais données non extraites")
+            
+            return contenance_data
+            
+        except Exception as e:
+            logger.warning(f"Erreur extraction contenance totale: {e}")
+            return {}
+
+    def apply_contenance_totale_to_properties(self, properties: List[Dict], contenance_totale: Dict):
+        """Applique les valeurs HA, A, CA du tableau contenance totale aux propriétés"""
+        if not contenance_totale or not properties:
+            return
+            
+        logger.info(f"🔄 Application contenance totale à {len(properties)} propriété(s)")
+        
+        for prop in properties:
+            # Ajouter les valeurs HA, A, CA si elles n'existent pas déjà
+            if 'HA' not in prop and 'HA' in contenance_totale:
+                prop['HA'] = contenance_totale['HA']
+            if 'A' not in prop and 'A' in contenance_totale:
+                prop['A'] = contenance_totale['A']
+            if 'CA' not in prop and 'CA' in contenance_totale:
+                prop['CA'] = contenance_totale['CA']
+
+    def extract_owners_with_vision_simple(self, pdf_path: Path) -> List[Dict]:
+        """
+        EXTRACTION HYBRIDE ÉTAPE 2: Extraction des propriétaires avec OpenAI Vision.
+        Utilise le prompt simplifié du style Make.
+        """
+        logger.info(f"👤 Extraction propriétaires OpenAI pour {pdf_path.name}")
+        
+        # Convertir PDF en images
+        images = self.pdf_to_images(pdf_path)
+        if not images:
+            return []
+        
+        all_owners = []
+        
+        for page_num, image_data in enumerate(images, 1):
+            try:
+                # Encoder l'image
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                
+                # PROMPT SIMPLIFIÉ (style Make)
+                simple_prompt = """
+In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. Format the address as street address, city and post code. If city or postcode is not available, just leave it blank. There can be one or multiple owners. I want to extract all of them and return them in json format.
+
+Output example:
+{
+  "owners": [
+    {
+      "nom": "MARTIN",
+      "prenom": "MARIE MADELEINE", 
+      "street_address": "2 RUE DE PARIS",
+      "city": "KINGERSHEIM",
+      "post_code": "68260",
+      "numero_proprietaire": "MBRWL8",
+      "department": "21",
+      "commune": "026",
+      "droit_reel": "Propriétaire/Indivision"
+    }
+  ]
+}
+"""
+                
+                # Appel OpenAI (paramètres identiques à Make)
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": simple_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}",
+                                        "detail": "high"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=1.0,  # Exactement comme Make
+                    response_format={"type": "json_object"}
+                )
+                
+                # Parser la réponse
+                response_text = response.choices[0].message.content.strip()
+                try:
+                    result = json.loads(response_text)
+                    if "owners" in result and result["owners"]:
+                        all_owners.extend(result["owners"])
+                        logger.info(f"✅ Page {page_num}: {len(result['owners'])} propriétaire(s)")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Erreur JSON page {page_num}: {e}")
+                    
+            except Exception as e:
+                logger.error(f"Erreur extraction page {page_num}: {e}")
+                continue
+        
+        logger.info(f"👤 Total propriétaires extraits: {len(all_owners)}")
+        return all_owners
+
+    def merge_structured_and_vision_data(self, structured_data: Dict, owners_data: List[Dict], filename: str) -> List[Dict]:
+        """
+        EXTRACTION HYBRIDE ÉTAPE 3: Fusion intelligente des données tableaux + propriétaires.
+        """
+        logger.info(f"🔗 Fusion hybride pour {filename}")
+        
+        merged_properties = []
+        
+        # Récupérer les données structurées
+        prop_batie = structured_data.get("prop_batie", [])
+        non_prop_batie = structured_data.get("non_batie", [])
+        
+        # Combiner toutes les propriétés structurées
+        all_structured = prop_batie + non_prop_batie
+        
+        if not all_structured and not owners_data:
+            logger.warning(f"Aucune donnée extraite pour {filename}")
+            return []
+        
+        # Stratégie de fusion
+        if all_structured and owners_data:
+            # CAS OPTIMAL: Les deux types de données
+            logger.info(f"🎯 Fusion: {len(all_structured)} propriétés + {len(owners_data)} propriétaires")
+            
+            for i, structured_prop in enumerate(all_structured):
+                merged_prop = self.convert_structured_to_standard_format(structured_prop)
+                
+                # Associer avec un propriétaire si disponible
+                if i < len(owners_data):
+                    owner = owners_data[i]
+                    merged_prop.update({
+                        'nom': owner.get('nom', ''),
+                        'prenom': owner.get('prenom', ''),
+                        'numero_majic': owner.get('numero_proprietaire', ''),
+                        'voie': owner.get('street_address', ''),
+                        'post_code': owner.get('post_code', ''),
+                        'city': owner.get('city', ''),
+                        'droit_reel': owner.get('droit_reel', ''),
+                        'department': owner.get('department', ''),
+                        'commune': owner.get('commune', '')
+                    })
+                
+                merged_properties.append(merged_prop)
+            
+            # Ajouter les propriétaires restants s'il y en a plus
+            for j in range(len(all_structured), len(owners_data)):
+                owner = owners_data[j]
+                merged_prop = {
+                    'department': owner.get('department', ''),
+                    'commune': owner.get('commune', ''),
+                    'prefixe': '',
+                    'section': '',
+                    'numero': '',
+                    'contenance': '',
+                    'droit_reel': owner.get('droit_reel', ''),
+                    'designation_parcelle': '',
+                    'nom': owner.get('nom', ''),
+                    'prenom': owner.get('prenom', ''),
+                    'numero_majic': owner.get('numero_proprietaire', ''),
+                    'voie': owner.get('street_address', ''),
+                    'post_code': owner.get('post_code', ''),
+                    'city': owner.get('city', '')
+                }
+                merged_properties.append(merged_prop)
+                
+        elif all_structured:
+            # Seulement des données structurées
+            logger.info(f"📊 Seulement données structurées: {len(all_structured)}")
+            for structured_prop in all_structured:
+                merged_prop = self.convert_structured_to_standard_format(structured_prop)
+                merged_properties.append(merged_prop)
+                
+        elif owners_data:
+            # Seulement des propriétaires
+            logger.info(f"👤 Seulement propriétaires: {len(owners_data)}")
+            for owner in owners_data:
+                merged_prop = {
+                    'department': owner.get('department', ''),
+                    'commune': owner.get('commune', ''),
+                    'prefixe': '',
+                    'section': '',
+                    'numero': '',
+                    'contenance': '',
+                    'droit_reel': owner.get('droit_reel', ''),
+                    'designation_parcelle': '',
+                    'nom': owner.get('nom', ''),
+                    'prenom': owner.get('prenom', ''),
+                    'numero_majic': owner.get('numero_proprietaire', ''),
+                    'voie': owner.get('street_address', ''),
+                    'post_code': owner.get('post_code', ''),
+                    'city': owner.get('city', '')
+                }
+                merged_properties.append(merged_prop)
+        
+        logger.info(f"🎉 Fusion hybride terminée: {len(merged_properties)} propriétés")
+        return merged_properties
+
+    def convert_structured_to_standard_format(self, structured_prop: Dict) -> Dict:
+        """Convertit les données pdfplumber au format standard."""
+        return {
+            'department': '',
+            'commune': '',
+            'prefixe': structured_prop.get('Préfixe', ''),
+            'section': structured_prop.get('Sec', structured_prop.get('Section', '')),
+            'numero': structured_prop.get('N° Plan', structured_prop.get('Numéro', '')),
+            'contenance': structured_prop.get('Contenance', ''),
+            'droit_reel': '',
+            'designation_parcelle': structured_prop.get('Adresse', structured_prop.get('Désignation', '')),
+            'nom': '',
+            'prenom': '',
+            'numero_majic': '',
+            'voie': '',
+            'post_code': '',
+            'city': ''
+        }
+
+    def process_single_pdf_hybrid(self, pdf_path: Path) -> List[Dict]:
+        """
+        TRAITEMENT HYBRIDE PRINCIPAL : pdfplumber + OpenAI Vision
+        Réplique l'approche Make pour des résultats optimaux.
+        """
+        logger.info(f"🚀 TRAITEMENT HYBRIDE de {pdf_path.name}")
+        
+        # ÉTAPE 1: Extraction tableaux avec pdfplumber
+        structured_data = self.extract_tables_with_pdfplumber(pdf_path)
+        
+        # ÉTAPE 2: Extraction propriétaires avec OpenAI Vision
+        owners_data = self.extract_owners_with_vision_simple(pdf_path)
+        
+        # ÉTAPE 3: Fusion intelligente
+        merged_properties = self.merge_structured_and_vision_data(structured_data, owners_data, pdf_path.name)
+        
+        # ÉTAPE 4: Finalisation avec IDs uniques et propagation
+        final_properties = []
+        for prop in merged_properties:
+            # Générer l'ID unique
+            unique_id = self.generate_unique_id(
+                department=prop.get('department', '00'),
+                commune=prop.get('commune', '000'),
+                section=prop.get('section', 'A'),
+                numero=prop.get('numero', '0000'),
+                prefixe=prop.get('prefixe', '')
+            )
+            
+            # Ajouter l'ID unique et le fichier source
+            prop['id'] = unique_id
+            prop['fichier_source'] = pdf_path.name
+            
+            final_properties.append(prop)
+        
+        # Propagation des valeurs
+        if final_properties:
+            final_properties = self.propagate_values_downward(final_properties, ['designation_parcelle', 'prefixe'])
+        
+        logger.info(f"✅ HYBRIDE terminé: {len(final_properties)} propriété(s) pour {pdf_path.name}")
+        return final_properties
+
     def process_single_pdf(self, pdf_path: Path) -> List[Dict]:
         """
         Traite un PDF MULTI-PAGES avec fusion intelligente des données.
@@ -1174,7 +1621,7 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 
     def export_to_csv(self, all_properties: List[Dict], output_filename: str = "output.csv") -> None:
         """
-        Exporte toutes les données vers un fichier CSV.
+        Exporte toutes les données vers un fichier CSV avec séparateur point-virgule.
         
         Args:
             all_properties: Liste de toutes les propriétés
@@ -1187,9 +1634,10 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         # Créer le DataFrame
         df = pd.DataFrame(all_properties)
         
-        # Colonnes selon les spécifications du client
+        # Colonnes selon les spécifications du client (avec contenance détaillée)
         columns_order = [
-            'department', 'commune', 'prefixe', 'section', 'numero', 'contenance', 
+            'department', 'commune', 'prefixe', 'section', 'numero', 
+            'contenance_ha', 'contenance_a', 'contenance_ca',
             'droit_reel', 'designation_parcelle', 'nom', 'prenom', 'numero_majic', 
             'voie', 'post_code', 'city', 'id', 'fichier_source'
         ]
@@ -1201,7 +1649,9 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
             'prefixe': 'Préfixe',
             'section': 'Section',
             'numero': 'Numéro',
-            'contenance': 'Contenance',
+            'contenance_ha': 'Contenance HA',
+            'contenance_a': 'Contenance A', 
+            'contenance_ca': 'Contenance CA',
             'droit_reel': 'Droit réel',
             'designation_parcelle': 'Designation Parcelle',
             'nom': 'Nom Propri',
@@ -1218,11 +1668,69 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         df = df.reindex(columns=columns_order, fill_value='')
         df = df.rename(columns=column_mapping)
         
-        # Exporter
+        # Export CSV avec séparateur point-virgule (meilleur pour Excel français)
         output_path = self.output_dir / output_filename
-        df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        df.to_csv(output_path, index=False, encoding='utf-8-sig', sep=';')
         
-        logger.info(f"📊 Données exportées vers {output_path}")
+        logger.info(f"📊 Données CSV exportées vers {output_path} (séparateur: ;)")
+        logger.info(f"📈 Total: {len(all_properties)} propriété(s) dans {len(df['Fichier source'].unique())} fichier(s)")
+        
+        return output_path
+
+    def export_to_excel(self, all_properties: List[Dict], output_filename: str = "output.xlsx") -> None:
+        """
+        Exporte toutes les données vers un fichier Excel (.xlsx).
+        
+        Args:
+            all_properties: Liste de toutes les propriétés
+            output_filename: Nom du fichier de sortie
+        """
+        if not all_properties:
+            logger.warning("Aucune donnée à exporter en Excel")
+            return
+        
+        # Créer le DataFrame
+        df = pd.DataFrame(all_properties)
+        
+        # Colonnes selon les spécifications du client (avec contenance détaillée)
+        columns_order = [
+            'department', 'commune', 'prefixe', 'section', 'numero', 
+            'contenance_ha', 'contenance_a', 'contenance_ca',
+            'droit_reel', 'designation_parcelle', 'nom', 'prenom', 'numero_majic', 
+            'voie', 'post_code', 'city', 'id', 'fichier_source'
+        ]
+        
+        # Renommer les colonnes pour plus de clarté
+        column_mapping = {
+            'department': 'Département',
+            'commune': 'Commune', 
+            'prefixe': 'Préfixe',
+            'section': 'Section',
+            'numero': 'Numéro',
+            'contenance_ha': 'Contenance HA',
+            'contenance_a': 'Contenance A', 
+            'contenance_ca': 'Contenance CA',
+            'droit_reel': 'Droit réel',
+            'designation_parcelle': 'Designation Parcelle',
+            'nom': 'Nom Propri',
+            'prenom': 'Prénom Propri',
+            'numero_majic': 'N°MAJIC',
+            'voie': 'Voie',
+            'post_code': 'CP',
+            'city': 'Ville',
+            'id': 'id',
+            'fichier_source': 'Fichier source'
+        }
+        
+        # Réorganiser et renommer
+        df = df.reindex(columns=columns_order, fill_value='')
+        df = df.rename(columns=column_mapping)
+        
+        # Export Excel
+        output_path = self.output_dir / output_filename
+        df.to_excel(output_path, index=False, engine='openpyxl')
+        
+        logger.info(f"📊 Données Excel exportées vers {output_path}")
         logger.info(f"📈 Total: {len(all_properties)} propriété(s) dans {len(df['Fichier source'].unique())} fichier(s)")
         
         return output_path
@@ -1344,14 +1852,14 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         """
         Traitement optimisé pour un lot de PDFs homogènes.
         """
-        logger.info("🔄 Traitement homogène optimisé")
+        logger.info("🔄 Traitement homogène optimisé STYLE MAKE")
         all_properties = []
         
-        # Traiter avec paramètres optimisés pour le format détecté
+        # Traiter avec approche Make exacte
         for i, pdf_file in enumerate(pdf_files, 1):
-            logger.info(f"📄 Traitement homogène {i}/{len(pdf_files)}: {pdf_file.name}")
+            logger.info(f"📄 Traitement Make {i}/{len(pdf_files)}: {pdf_file.name}")
             
-            properties = self.process_single_pdf(pdf_file)
+            properties = self.process_like_make(pdf_file)
             all_properties.extend(properties)
             
             # Log intermédiaire pour suivi
@@ -1362,49 +1870,39 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 
     def process_high_volume_batch(self, pdf_files: List[Path]) -> List[Dict]:
         """
-        Traitement optimisé pour un grand volume de PDFs.
+        Traitement optimisé pour gros volume avec style Make.
         """
-        logger.info("🚀 Traitement haute performance pour volume élevé")
+        logger.info("🚀 Traitement haut volume STYLE MAKE")
         all_properties = []
         
-        # Traitement par chunks pour optimiser la mémoire
-        chunk_size = 5
-        chunks = [pdf_files[i:i + chunk_size] for i in range(0, len(pdf_files), chunk_size)]
-        
-        for chunk_idx, chunk in enumerate(chunks, 1):
-            logger.info(f"📦 Chunk {chunk_idx}/{len(chunks)}: {len(chunk)} PDFs")
+        for i, pdf_file in enumerate(pdf_files, 1):
+            logger.info(f"📄 Volume Make {i}/{len(pdf_files)}: {pdf_file.name}")
             
-            for pdf_file in chunk:
-                properties = self.process_single_pdf(pdf_file)
-                all_properties.extend(properties)
+            properties = self.process_like_make(pdf_file)
+            all_properties.extend(properties)
             
-            logger.info(f"✅ Chunk {chunk_idx} terminé: {len(all_properties)} propriétés totales")
+            # Logs de progression
+            if i % 10 == 0:
+                logger.info(f"📊 Progression: {i}/{len(pdf_files)} fichiers traités")
         
         return all_properties
 
     def process_mixed_adaptive_batch(self, pdf_files: List[Path]) -> List[Dict]:
         """
-        Traitement adaptatif pour un lot de PDFs mixtes.
+        Traitement adaptatif mixte avec style Make.
         """
-        logger.info("🧠 Traitement adaptatif pour formats mixtes")
+        logger.info("🎯 Traitement adaptatif mixte STYLE MAKE")
         all_properties = []
         
         for i, pdf_file in enumerate(pdf_files, 1):
-            logger.info(f"🔄 Traitement adaptatif {i}/{len(pdf_files)}: {pdf_file.name}")
+            logger.info(f"📄 Adaptatif Make {i}/{len(pdf_files)}: {pdf_file.name}")
             
-            # Traitement avec détection individuelle optimisée
-            properties = self.process_single_pdf(pdf_file)
+            properties = self.process_like_make(pdf_file)
+            all_properties.extend(properties)
             
-            if properties:
-                all_properties.extend(properties)
-                logger.info(f"✅ {pdf_file.name}: {len(properties)} propriétés extraites")
-            else:
-                logger.warning(f"⚠️ {pdf_file.name}: Aucune propriété extraite")
-            
-            # Statistiques intermédiaires
-            if i % 3 == 0:
-                avg_per_pdf = len(all_properties) / i
-                logger.info(f"📈 Progrès: {len(all_properties)} propriétés, moyenne {avg_per_pdf:.1f}/PDF")
+            # Suivi adaptatif
+            if len(properties) == 0:
+                logger.warning(f"⚠️ Aucune propriété extraite pour {pdf_file.name}")
         
         return all_properties
 
@@ -1496,17 +1994,22 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 
     def export_to_csv_with_stats(self, all_properties: List[Dict]) -> None:
         """
-        Export CSV avec statistiques détaillées de qualité.
+        Export CSV et Excel avec statistiques détaillées.
         """
         if not all_properties:
             logger.warning("Aucune donnée à exporter")
             return
         
-        # Export CSV standard
-        self.export_to_csv(all_properties)
+        # Export CSV (avec point-virgule) ET Excel
+        csv_path = self.export_to_csv(all_properties)
+        excel_path = self.export_to_excel(all_properties, "output.xlsx")
         
         # Générer des statistiques de qualité
         self.generate_quality_report(all_properties)
+        
+        logger.info(f"✅ EXPORTS TERMINÉS:")
+        logger.info(f"📄 CSV: {csv_path}")
+        logger.info(f"📊 Excel: {excel_path}")
 
     def generate_quality_report(self, properties: List[Dict]) -> None:
         """
@@ -1549,6 +2052,299 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         logger.info("  ✅ Aucune invention ou interpolation de données")
         logger.info("  ✅ Colonnes vides = vraiment absentes du PDF original")
         logger.info("  ✅ Aucun risque de mélange entre propriétaires/adresses")
+
+    def process_like_make(self, pdf_path: Path) -> List[Dict]:
+        """
+        RÉPLIQUE EXACTE DU WORKFLOW MAKE
+        
+        Suit exactement la même logique que l'automatisation Make :
+        1. pdfplumber pour les tableaux (comme Python Anywhere)
+        2. OpenAI Vision simple pour les propriétaires (prompt Make)
+        3. Traitement individuel (comme BasicFeeder) 
+        4. Génération ID avec OpenAI (comme Make)
+        5. Fusion 1:1 simple
+        """
+        logger.info(f"🎯 TRAITEMENT STYLE MAKE pour {pdf_path.name}")
+        
+        try:
+            # ÉTAPE 1: Extraction tableaux (comme Python Anywhere)
+            structured_data = self.extract_tables_with_pdfplumber(pdf_path)
+            logger.info(f"📋 Tableaux extraits: {len(structured_data.get('prop_batie', []))} bâtis, {len(structured_data.get('non_batie', []))} non-bâtis")
+            
+            # ÉTAPE 2: Extraction propriétaires (prompt Make exact)
+            owners = self.extract_owners_make_style(pdf_path)
+            logger.info(f"Proprietaires extraits: {len(owners)}")
+            
+            if not owners and not structured_data.get('prop_batie') and not structured_data.get('non_batie'):
+                logger.warning(f"Aucune donnée extraite pour {pdf_path.name}")
+                return []
+            
+            # ÉTAPE 3: Traitement individuel (comme BasicFeeder Make)
+            final_results = []
+            
+            # Traiter les propriétés non bâties (comme route 1 Make)
+            non_batie_props = structured_data.get('non_batie', [])
+            if non_batie_props and owners:
+                logger.info("🏞️ Traitement propriétés non bâties style Make")
+                for owner in owners:
+                    for prop in non_batie_props:
+                        if prop.get('Adresse'):  # Filtre comme Make
+                            # Génération ID avec OpenAI (comme Make)
+                            unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                            
+                            # Fusion 1:1 simple (comme Make)
+                            combined = self.merge_like_make(owner, prop, unique_id, 'non_batie', pdf_path.name)
+                            final_results.append(combined)
+            
+            # Traiter les propriétés bâties (comme route 2 Make)
+            prop_batie = structured_data.get('prop_batie', [])
+            if prop_batie and owners:
+                logger.info("🏠 Traitement propriétés bâties style Make")
+                for owner in owners:
+                    for prop in prop_batie:
+                        if prop.get('Adresse'):  # Filtre comme Make
+                            # Génération ID avec OpenAI (comme Make)
+                            unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                            
+                            # Fusion 1:1 simple (comme Make)
+                            combined = self.merge_like_make(owner, prop, unique_id, 'batie', pdf_path.name)
+                            final_results.append(combined)
+            
+            # Si pas de structured data, juste les propriétaires
+            if not non_batie_props and not prop_batie and owners:
+                logger.info("👤 Seulement propriétaires (pas de tableaux)")
+                for owner in owners:
+                    combined = self.merge_like_make(owner, {}, "", 'owners_only', pdf_path.name)
+                    final_results.append(combined)
+            
+            # ÉTAPE 4: Propagation des valeurs manquantes (prefixe, contenance détaillée)
+            final_results = self.propagate_values_downward(final_results, ['prefixe', 'contenance_ha', 'contenance_a', 'contenance_ca'])
+            
+            logger.info(f"Traitement Make termine: {len(final_results)} proprietes finales")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur traitement Make {pdf_path.name}: {e}")
+            return []
+
+    def extract_owners_make_style(self, pdf_path: Path) -> List[Dict]:
+        """
+        Extraction des propriétaires EXACTEMENT comme Make.
+        Utilise le prompt exact et les paramètres exacts de Make.
+        """
+        logger.info(f"Extraction propriétaires style Make pour {pdf_path.name}")
+        
+        # Convertir PDF en images
+        images = self.pdf_to_images(pdf_path)
+        if not images:
+            return []
+        
+        all_owners = []
+        
+        for page_num, image_data in enumerate(images, 1):
+            try:
+                # Encoder l'image
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                
+                # PROMPT EXACT DE MAKE (copié à l'identique avec amélioration adresses)
+                make_prompt = """In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. 
+
+For addresses: Extract street address, city and post code separately. If some parts are missing, try to extract whatever is available. If completely no address is found, leave all address fields blank.
+
+There can be one or multiple owners. I want to extract all of them and return them in json format.
+output example:
+
+{"owners": [
+    {
+        "nom": "MARTIN",
+        "prenom": "MARIE MADELEINE",
+        "street_address": "2 RUE DE PARIS",
+       "city": "KINGERSHEIM",
+        "post_code": "68260",
+        "numero_proprietaire": "MBRWL8",
+"department": 21,
+"commune": 026,
+"droit reel": "Propriétaire/Indivision"
+    },
+    {
+        "nom": "LALLEMAND",
+        "prenom": "ERIC",
+         "street_address": "2 RUE DE PARIS",
+       "city": "KINGERSHEIM",
+        "post_code": "68260",
+        "numero_proprietaire": "MBXNZ8",
+"department": 21,
+"commune": 026,
+"droit reel": "Propriétaire/Indivision"
+    }
+]
+}"""
+                
+                # Appel OpenAI avec PARAMÈTRES EXACTS DE MAKE
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",  # Même modèle que Make
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": make_prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}",
+                                        "detail": "high"  # Même que Make
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=2048,        # Même que Make
+                    temperature=1,          # Même que Make (pas 1.0)
+                    n=1,        # Corrigé: n au lieu de n_completions
+                    response_format={"type": "json_object"}  # Même que Make
+                )
+                
+                # Parser la réponse EXACTEMENT comme Make
+                response_text = response.choices[0].message.content.strip()
+                try:
+                    result = json.loads(response_text)
+                    if "owners" in result and result["owners"]:
+                        page_owners = result["owners"]
+                        all_owners.extend(page_owners)
+                        logger.info(f"Page {page_num}: {len(page_owners)} proprietaire(s) extraits")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Erreur JSON page {page_num}: {e}")
+                    
+            except Exception as e:
+                logger.error(f"Erreur extraction proprietaires page {page_num}: {e}")
+                continue
+        
+        logger.info(f"Total proprietaires Make style: {len(all_owners)}")
+        return all_owners
+
+    def generate_id_with_openai_like_make(self, owner: Dict, prop: Dict) -> str:
+        """
+        Génère l'ID parcellaire avec OpenAI EXACTEMENT comme Make.
+        Utilise le prompt exact et gpt-4o-mini comme Make.
+        """
+        try:
+            # Extraire les données comme Make
+            department = owner.get('department', '')
+            commune = owner.get('commune', '')
+            section = prop.get('Sec', '')
+            plan_number = prop.get('N° Plan', '')
+            
+            # PROMPT EXACT DE MAKE (copié à l'identique) 
+            make_id_prompt = f"""You are given property data with the following fields:
+- Department: a 2-digit number
+- Commune: a 3-digit number
+- Section: a string (can be fewer than 5 characters)
+- Plan number: a number (can be fewer than 4 digits)
+
+Your task is to generate a 14-character Parcel ID by combining these fields in the following format:
+
+Parcel ID = Department (2 digits) + Commune (3 digits) + Section (padded to 5 characters with leading zeros) + Plan number (padded to 4 digits with leading zeros)
+
+### Example:
+Input:
+Department: 25  
+Commune: 024  
+Section: A  
+Plan number: 333
+
+Output:
+ID: 250240000A0333
+
+Now, using this rule, generate the Parcel ID for the following inputs:
+Department: {department} 
+Commune: {commune}
+Section: {section}
+Plan number: {plan_number}
+
+Only return the 14-character ID in json format:
+{{"ID": "14 character ID here"}}
+"""
+
+            # Appel OpenAI avec PARAMÈTRES EXACTS DE MAKE
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Même modèle que Make pour ID
+                messages=[
+                    {
+                        "role": "user", 
+                        "content": make_id_prompt
+                    }
+                ],
+                max_tokens=2048,        # Même que Make
+                temperature=1,          # Même que Make
+                response_format={"type": "json_object"}  # Même que Make
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            result = json.loads(response_text)
+            
+            if "ID" in result:
+                generated_id = result["ID"]
+                logger.info(f"ID genere: {generated_id}")
+                return generated_id
+            
+        except Exception as e:
+            logger.warning(f"Erreur generation ID: {e}")
+        
+        # Fallback comme notre méthode locale
+        return self.generate_unique_id(
+            str(department), str(commune), 
+            str(section), str(plan_number)
+        )
+
+    def merge_like_make(self, owner: Dict, prop: Dict, unique_id: str, prop_type: str, pdf_path_name: str) -> Dict:
+        """
+        Fusion EXACTEMENT comme Make (mapping direct des champs).
+        Réplique la logique Google Sheets de Make.
+        """
+        
+        # Mapping exact comme dans Make Google Sheets
+        merged = {
+            # Colonnes A-E (informations parcelle)
+            'department': str(owner.get('department', '')),  # Colonne A
+            'commune': str(owner.get('commune', '')),        # Colonne B  
+            'prefixe': str(prop.get('Préfixe', prop.get('Pfxe', ''))),  # Colonne C (récupéré depuis pdfplumber)
+            'section': str(prop.get('Sec', '')),            # Colonne D
+            'numero': str(prop.get('N° Plan', '')),         # Colonne E
+            
+            # Colonnes F-H (gestion/demande - vides dans Make)
+            'demandeur': '',    # Colonne F
+            'date': '',         # Colonne G  
+            'envoye': '',       # Colonne H
+            
+            # Colonne I (designation + contenance détaillée)
+            'designation_parcelle': str(prop.get('Adresse', '')),  # Colonne I
+            'contenance_ha': str(prop.get('HA', prop.get('Contenance', ''))),           # Hectares (fallback sur Contenance)
+            'contenance_a': str(prop.get('A', '')),             # Ares  
+            'contenance_ca': str(prop.get('CA', '')),           # Centiares
+            
+            # Colonnes J-O (propriétaire)
+            'nom': str(owner.get('nom', '')),                    # Colonne J
+            'prenom': str(owner.get('prenom', '')),             # Colonne K
+            'numero_majic': str(owner.get('numero_proprietaire', '')),  # Colonne L
+            'voie': str(owner.get('street_address', '')),       # Colonne M
+            'post_code': str(owner.get('post_code', '')),       # Colonne N
+            'city': str(owner.get('city', '')),                 # Colonne O
+            
+            # Colonnes P-R (statuts - vides dans Make)
+            'identifie': '',    # Colonne P
+            'rdp': '',          # Colonne Q
+            'sig': '',          # Colonne R
+            
+            # Colonnes S-T (ID et droit)
+            'id': unique_id,                                    # Colonne S
+            'droit_reel': str(owner.get('droit reel', '')),    # Colonne T
+            
+            # Métadonnées internes
+            'fichier_source': pdf_path_name,
+            'type_propriete': prop_type
+        }
+        
+        return merged
 
 
 def main():

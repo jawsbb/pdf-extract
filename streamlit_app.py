@@ -50,10 +50,17 @@ def initialize_extractor(temp_dir):
 
 def main():
     st.title("📋 Extracteur PDF Cadastral Français")
-    st.markdown("### Version Simplifiée - Extraction de Qualité")
+    st.markdown("### 🎯 Version Make - Logique Exacte")
     
     st.markdown("""
-    **Nouvelle structure de colonnes :**
+    **🚀 Nouvelle approche - Réplique exacte de l'automatisation Make :**
+    - ✅ **pdfplumber** pour les tableaux structurés (comme Python Anywhere)
+    - ✅ **OpenAI Vision** pour les propriétaires (prompt exact Make)
+    - ✅ **Traitement individuel** (comme BasicFeeder Make)
+    - ✅ **Génération ID OpenAI** (gpt-4o-mini comme Make)
+    - ✅ **Export CSV + Excel** avec séparateur ";"
+    
+    **Structure de colonnes :**
     `Département | Commune | Préfixe | Section | Numéro | Contenance | Droit réel | Designation Parcelle | Nom Propri | Prénom Propri | N°MAJIC | Voie | CP | Ville | id`
     """)
     
@@ -64,6 +71,9 @@ def main():
         accept_multiple_files=True,
         help="Vous pouvez sélectionner plusieurs fichiers PDF à traiter en une fois."
     )
+    
+    # Mode debug (toujours visible)
+    debug_mode = st.checkbox("🔍 Mode debug (plus d'infos)", value=False)
     
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} fichier(s) sélectionné(s)")
@@ -103,10 +113,44 @@ def main():
                             status_text.text(f"Traitement de {pdf_file.name}...")
                             progress_bar.progress((i + 1) / len(saved_files))
                             
-                            properties = extractor.process_single_pdf(pdf_file)
+                            if debug_mode:
+                                st.write(f"🔍 **Debug {pdf_file.name}:**")
+                                
+                                # Test pdfplumber
+                                with st.expander(f"📋 Tableaux pdfplumber - {pdf_file.name}"):
+                                    try:
+                                        structured = extractor.extract_tables_with_pdfplumber(pdf_file)
+                                        st.write(f"Propriétés bâties: {len(structured.get('prop_batie', []))}")
+                                        st.write(f"Propriétés non bâties: {len(structured.get('non_batie', []))}")
+                                        if structured.get('prop_batie'):
+                                            st.json(structured['prop_batie'][0])
+                                        if structured.get('non_batie'):
+                                            st.json(structured['non_batie'][0])
+                                    except Exception as e:
+                                        st.error(f"Erreur pdfplumber: {e}")
+                                
+                                # Test OpenAI
+                                with st.expander(f"👤 Propriétaires OpenAI - {pdf_file.name}"):
+                                    try:
+                                        owners = extractor.extract_owners_make_style(pdf_file)
+                                        st.write(f"Propriétaires trouvés: {len(owners)}")
+                                        if owners:
+                                            st.json(owners[0])
+                                    except Exception as e:
+                                        st.error(f"Erreur OpenAI: {e}")
+                            
+                            properties = extractor.process_like_make(pdf_file)
                             all_properties.extend(properties)
                             
-                            st.success(f"✅ {pdf_file.name}: {len(properties)} propriété(s) extraite(s)")
+                            if len(properties) > 0:
+                                st.success(f"✅ {pdf_file.name}: {len(properties)} propriété(s) extraite(s)")
+                            else:
+                                st.warning(f"⚠️ {pdf_file.name}: Aucune propriété extraite")
+                                if debug_mode:
+                                    st.write("Essayez de vérifier :")
+                                    st.write("- La qualité du PDF (scan vs PDF natif)")
+                                    st.write("- La présence de tableaux structurés")
+                                    st.write("- La visibilité des propriétaires")
                         
                         if all_properties:
                             # Export vers CSV
@@ -122,7 +166,7 @@ def main():
                             # Réorganiser les colonnes pour l'affichage
                             display_columns = [
                                 'department', 'commune', 'prefixe', 'section', 'numero', 
-                                'contenance', 'droit_reel', 'designation_parcelle', 
+                                'contenance_ha', 'contenance_a', 'contenance_ca', 'droit_reel', 'designation_parcelle', 
                                 'nom', 'prenom', 'numero_majic', 'voie', 'post_code', 'city', 'id'
                             ]
                             
@@ -205,7 +249,9 @@ def main():
         - **Préfixe** : Préfixe de section
         - **Section** : Section cadastrale
         - **Numéro** : Numéro de parcelle
-        - **Contenance** : Surface de la parcelle
+        - **Contenance HA** : Surface en hectares
+        - **Contenance A** : Surface en ares  
+        - **Contenance CA** : Surface en centiares
         - **Droit réel** : Type de droit (PP, US, NU)
         - **Designation Parcelle** : Nom/lieu-dit de la parcelle
         - **Nom Propri** : Nom du propriétaire
