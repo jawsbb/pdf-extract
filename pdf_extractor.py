@@ -802,6 +802,38 @@ Retourne TOUT ce que tu vois en JSON:
                     for i in range(len(clean_headers))
                 }
                 
+                # 🔧 CORRECTION SECTION : Debug et recherche améliorée
+                section_value = None
+                
+                # Debug : afficher toute la ligne pour diagnostic
+                logger.debug(f"DEBUG Ligne complète: {row}")
+                
+                # Méthode 1 : Par en-tête (existante)
+                for i, header in enumerate(clean_headers):
+                    if header and ('Sec' in header or 'Section' in header) and i < len(row):
+                        if row[i]:
+                            section_value = str(row[i]).strip()
+                            logger.debug(f"Section par en-tête '{header}': '{section_value}'")
+                            break
+                
+                # Méthode 2 : Si section vide ou trop courte, chercher dans toutes les cellules
+                import re
+                if not section_value or len(section_value) < 2:
+                    for cell in row:
+                        if cell:
+                            cell_str = str(cell).strip()
+                            # Rechercher pattern : 1-2 lettres majuscules (ZK, AA, C, etc.)
+                            if re.match(r'^[A-Z]{1,2}$', cell_str):
+                                section_value = cell_str
+                                logger.debug(f"Section trouvée par regex: '{section_value}'")
+                                break
+                
+                if section_value:
+                    property_dict['Sec'] = section_value
+                    logger.info(f"Section finale extraite: '{section_value}'")
+                else:
+                    logger.warning(f"Section non trouvée dans la ligne")
+                
                 # Ajouter les valeurs HA, A, CA si elles existent
                 if ha_pos is not None and ha_pos < len(row) and row[ha_pos]:
                     property_dict['HA'] = str(row[ha_pos]).strip()
