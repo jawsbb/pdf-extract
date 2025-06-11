@@ -19,17 +19,91 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from PIL import Image
 import io
+import logging.handlers
+import sys
+import tempfile
+import shutil
 
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('extraction.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configuration du logging avec encodage UTF-8 pour Windows
+def setup_logging():
+    """Configure le logging avec support UTF-8 pour Windows"""
+    # Créer un formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Logger principal
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    
+    # Supprimer les handlers existants
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Handler pour fichier avec encodage UTF-8
+    try:
+        file_handler = logging.FileHandler('extraction.log', encoding='utf-8', mode='a')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        print(f"Erreur configuration fichier log: {e}")
+    
+    # Handler pour console avec gestion des erreurs d'encodage
+    try:
+        # Créer un stream qui ignore les erreurs d'encodage
+        console_stream = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        console_handler = logging.StreamHandler(console_stream)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    except Exception:
+        # Fallback vers un handler console simple sans emojis
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    return logger
+
+# Initialiser le logger
+logger = setup_logging()
+
+def safe_json_parse(content: str, context: str = "API response") -> Optional[Dict]:
+    """
+    Parse JSON de manière robuste avec gestion d'erreurs
+    
+    Args:
+        content: Contenu à parser
+        context: Contexte pour le logging d'erreur
+    
+    Returns:
+        Dict parsé ou None si échec
+    """
+    if not content or content.strip() == "":
+        logger.warning(f"Contenu vide pour {context}")
+        return None
+    
+    # Nettoyer le contenu
+    content = content.strip()
+    
+    # Chercher un objet JSON dans la réponse
+    start_idx = content.find('{')
+    end_idx = content.rfind('}')
+    
+    if start_idx == -1 or end_idx == -1:
+        logger.warning(f"Pas de JSON trouvé dans {context}: {content[:100]}...")
+        return None
+    
+    try:
+        json_content = content[start_idx:end_idx+1]
+        result = json.loads(json_content)
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning(f"Erreur parsing JSON pour {context}: {e}")
+        logger.debug(f"Contenu problématique: {json_content[:200]}...")
+        return None
+    except Exception as e:
+        logger.error(f"Erreur inattendue parsing JSON pour {context}: {e}")
+        return None
 
 class PDFPropertyExtractor:
     """Classe principale pour l'extraction d'informations de propriétaires depuis des PDFs."""
@@ -290,30 +364,23 @@ EXEMPLE 2:
             elif response_text.startswith('```'):
                 response_text = response_text[3:-3]
             
-            try:
-                main_result = json.loads(response_text)
+            main_result = safe_json_parse(response_text, f"extraction principale {filename}")
+            
+            if main_result and "proprietes" in main_result and main_result["proprietes"]:
+                properties = main_result["proprietes"]
+                logger.info(f"Extraction principale: {len(properties)} propriété(s) pour {filename}")
                 
-                if "proprietes" in main_result and main_result["proprietes"]:
-                    properties = main_result["proprietes"]
-                    logger.info(f"✅ Extraction principale: {len(properties)} propriété(s) pour {filename}")
-                    
-                    # DEUXIÈME PASSE: Récupération des champs manquants
-                    enhanced_properties = self.enhance_missing_fields(properties, base64_image, filename)
-                    
-                    if enhanced_properties:
-                        logger.info(f"🚀 Extraction ULTRA-OPTIMISÉE terminée: {len(enhanced_properties)} propriété(s) pour {filename}")
-                        return {"proprietes": enhanced_properties}
-                    else:
-                        return main_result
+                # DEUXIÈME PASSE: Récupération des champs manquants
+                enhanced_properties = self.enhance_missing_fields(properties, base64_image, filename)
+                
+                if enhanced_properties:
+                    logger.info(f"Extraction ULTRA-OPTIMISÉE terminée: {len(enhanced_properties)} propriété(s) pour {filename}")
+                    return {"proprietes": enhanced_properties}
                 else:
-                    logger.warning(f"❌ Extraction principale sans résultat pour {filename}")
-                    # PASSE DE SECOURS: Extraction d'urgence
-                    return self.emergency_extraction(base64_image, filename)
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Erreur JSON pour {filename}: {e}")
-                logger.error(f"Réponse: {response_text[:500]}...")
-                # PASSE DE SECOURS en cas d'erreur JSON
+                    return main_result
+            else:
+                logger.warning(f"Extraction principale sans résultat pour {filename}")
+                # PASSE DE SECOURS: Extraction d'urgence
                 return self.emergency_extraction(base64_image, filename)
                 
         except Exception as e:
@@ -408,7 +475,11 @@ Exemples typiques:
             if "```json" in location_text:
                 location_text = location_text.split("```json")[1].split("```")[0].strip()
             
-            location_data = json.loads(location_text)
+            location_data = safe_json_parse(location_text, f"extraction localisation {filename}")
+            
+            if not location_data:
+                logger.warning(f"Échec parsing localisation pour {filename}")
+                return properties
             
             if "location" in location_data:
                 dept = location_data["location"].get("department")
@@ -482,7 +553,11 @@ Exemples typiques:
             if "```json" in owner_text:
                 owner_text = owner_text.split("```json")[1].split("```")[0].strip()
             
-            owner_data = json.loads(owner_text)
+            owner_data = safe_json_parse(owner_text, f"extraction propriétaires {filename}")
+            
+            if not owner_data:
+                logger.warning(f"Échec parsing propriétaires pour {filename}")
+                return properties
             
             if "owners" in owner_data and owner_data["owners"]:
                 owners = owner_data["owners"]
@@ -558,7 +633,11 @@ Retourne TOUT ce que tu vois en JSON:
             if "```json" in emergency_text:
                 emergency_text = emergency_text.split("```json")[1].split("```")[0].strip()
             
-            result = json.loads(emergency_text)
+            result = safe_json_parse(emergency_text, f"extraction urgence {filename}")
+            
+            if not result:
+                logger.error(f"Échec total extraction pour {filename}")
+                return None
             if "proprietes" in result and result["proprietes"]:
                 logger.info(f"🆘 Extraction d'urgence réussie: {len(result['proprietes'])} propriété(s)")
                 return result
@@ -618,8 +697,8 @@ Retourne TOUT ce que tu vois en JSON:
 
     def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
         """
-        Génère un identifiant unique de 14 caractères selon les spécifications :
-        Département (2) + Commune (3) + Section (5) + Numéro de plan (4)
+        GÉNÉRATION D'ID ULTRA-ROBUSTE - EXACTEMENT 14 CARACTÈRES GARANTIS
+        Format strict: DD(2) + CCC(3) + SSSSS(5) + NNNN(4) = 14
         
         Args:
             department: Code département
@@ -629,53 +708,77 @@ Retourne TOUT ce que tu vois en JSON:
             prefixe: Préfixe optionnel (ignoré dans cette version)
             
         Returns:
-            ID unique formaté sur 14 caractères (ex: 25227000ZD0005)
+            ID unique formaté sur EXACTEMENT 14 caractères (ex: 25227ZD0000005)
         """
-        # Département : 2 chiffres
-        dept = str(department).zfill(2) if department and department != "N/A" else "00"
+        # ÉTAPE 1: Département - EXACTEMENT 2 caractères
+        dept = str(department or "00").strip()
+        if dept == "N/A" or not dept:
+            dept = "00"
+        dept = dept.zfill(2)[:2]  # Force exactement 2 caractères
         
-        # Commune : 3 chiffres
-        comm = str(commune).zfill(3) if commune and commune != "N/A" else "000"
+        # ÉTAPE 2: Commune - EXACTEMENT 3 caractères  
+        comm = str(commune or "000").strip()
+        if comm == "N/A" or not comm:
+            comm = "000"
+        comm = comm.zfill(3)[:3]  # Force exactement 3 caractères
         
-        # Section : 5 caractères avec zéros à gauche si nécessaire
-        if section and section != "N/A":
-            sect = str(section).strip()
-            # Si la section fait moins de 5 caractères, compléter avec des zéros à gauche
+        # ÉTAPE 3: Section - EXACTEMENT 5 caractères (POINT CRITIQUE)
+        if section and str(section).strip() and section != "N/A":
+            sect = str(section).strip().upper()
+            # FORÇAGE STRICT: Toujours exactement 5 caractères
             if len(sect) < 5:
-                sect = sect.zfill(5)
+                sect = sect.ljust(5, '0')  # Compléter à droite avec des zéros
             elif len(sect) > 5:
-                # Si plus de 5 caractères, tronquer à 5
-                sect = sect[:5]
+                sect = sect[:5]  # Tronquer à exactement 5
         else:
-            sect = "0000A"  # Section par défaut
+            sect = "0000A"  # Section par défaut (5 caractères garantis)
         
-        # Numéro de plan : 4 chiffres avec zéros à gauche
-        if numero and numero != "N/A":
+        # Validation section
+        if len(sect) != 5:
+            logger.error(f"🚨 Section problème: '{section}' → '{sect}' (longueur: {len(sect)})")
+            sect = (sect + "00000")[:5]  # Force correction d'urgence
+        
+        # ÉTAPE 4: Numéro - EXACTEMENT 4 caractères
+        if numero and str(numero).strip() and numero != "N/A":
             num = str(numero).strip()
-            # Enlever les caractères non numériques et prendre les chiffres
-            num_clean = ''.join(filter(str.isdigit, num))
-            if num_clean:
-                num = num_clean.zfill(4)
-                # Si plus de 4 chiffres, prendre les 4 derniers
-                if len(num) > 4:
-                    num = num[-4:]
+            # Traitement selon le type
+            if num.isdigit():
+                num = num.zfill(4)[-4:]  # Derniers 4 chiffres si trop long
             else:
-                num = "0001"  # Numéro par défaut si pas de chiffres
+                # Pour les numéros alphanumériques, compléter ou tronquer
+                if len(num) < 4:
+                    num = num.ljust(4, '0')
+                elif len(num) > 4:
+                    num = num[:4]
         else:
-            num = "0001"  # Numéro par défaut
+            num = "0001"  # Numéro par défaut (4 caractères garantis)
         
-        # Format final : DDCCCSSSSSNNNNN (14 caractères)
+        # Validation numéro
+        if len(num) != 4:
+            logger.error(f"🚨 Numéro problème: '{numero}' → '{num}' (longueur: {len(num)})")
+            num = (num + "0000")[:4]  # Force correction d'urgence
+        
+        # ASSEMBLAGE FINAL
         unique_id = f"{dept}{comm}{sect}{num}"
         
-        # Vérification de la longueur
+        # VALIDATION ULTRA-STRICTE FINALE
         if len(unique_id) != 14:
-            logger.warning(f"ID généré de longueur incorrecte ({len(unique_id)}): {unique_id}")
-            # Ajuster si nécessaire
+            logger.error(f"🚨 ID LONGUEUR CRITIQUE: '{unique_id}' = {len(unique_id)} caractères")
+            logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) sect='{sect}'({len(sect)}) num='{num}'({len(num)})")
+            
+            # CORRECTION FORCÉE ABSOLUE
             if len(unique_id) < 14:
                 unique_id = unique_id.ljust(14, '0')
-            else:
+                logger.warning(f"🔧 ID COMPLÉTÉ: '{unique_id}'")
+            elif len(unique_id) > 14:
                 unique_id = unique_id[:14]
+                logger.warning(f"🔧 ID TRONQUÉ: '{unique_id}'")
         
+        # ASSERTION FINALE - Garantie absolue 14 caractères
+        if len(unique_id) != 14:
+            raise ValueError(f"ERREUR FATALE: ID '{unique_id}' = {len(unique_id)} caractères (devrait être 14)")
+        
+        logger.debug(f"✅ ID ROBUSTE: '{unique_id}' (longueur: {len(unique_id)})")
         return unique_id
 
     def extract_tables_with_pdfplumber(self, pdf_path: Path) -> Dict:
@@ -984,13 +1087,12 @@ Output example:
                 
                 # Parser la réponse
                 response_text = response.choices[0].message.content.strip()
-                try:
-                    result = json.loads(response_text)
-                    if "owners" in result and result["owners"]:
-                        all_owners.extend(result["owners"])
-                        logger.info(f"✅ Page {page_num}: {len(result['owners'])} propriétaire(s)")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Erreur JSON page {page_num}: {e}")
+                result = safe_json_parse(response_text, f"vision simple page {page_num}")
+                if result and "owners" in result and result["owners"]:
+                    all_owners.extend(result["owners"])
+                    logger.info(f"Page {page_num}: {len(result['owners'])} propriétaire(s)")
+                else:
+                    logger.warning(f"Pas de propriétaires trouvés page {page_num}")
                     
             except Exception as e:
                 logger.error(f"Erreur extraction page {page_num}: {e}")
@@ -1280,13 +1382,53 @@ Output example:
                 temperature=0.1
             )
             
-            detection_result = json.loads(response.choices[0].message.content.strip())
-            logger.info(f"🔍 Format détecté: {detection_result.get('document_type')} - {detection_result.get('format_era')} - Stratégie: {detection_result.get('extraction_strategy')}")
+            content = response.choices[0].message.content
+            if not content or content.strip() == "":
+                logger.warning("Réponse API vide pour détection format")
+                raise ValueError("Réponse vide")
+            
+            # Nettoyer le contenu et extraire le JSON
+            content = content.strip()
+            
+            # Chercher un objet JSON dans la réponse
+            start_idx = content.find('{')
+            end_idx = content.rfind('}')
+            
+            if start_idx == -1 or end_idx == -1:
+                logger.warning(f"Pas de JSON trouvé dans la réponse: {content[:100]}...")
+                raise ValueError("Pas de JSON dans la réponse")
+            
+            json_content = content[start_idx:end_idx+1]
+            detection_result = json.loads(json_content)
+            
+            # Vérifier que tous les champs requis sont présents
+            required_fields = ["document_type", "format_era", "layout", "extraction_strategy"]
+            for field in required_fields:
+                if field not in detection_result:
+                    logger.warning(f"Champ manquant dans détection: {field}")
+                    raise ValueError(f"Champ manquant: {field}")
+            
+            logger.info(f"Format détecté: {detection_result.get('document_type')} - {detection_result.get('format_era')} - Stratégie: {detection_result.get('extraction_strategy')}")
             return detection_result
             
-        except Exception as e:
-            logger.warning(f"⚠️ Échec détection format: {e}")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"Échec détection format: {e}")
             # Format par défaut pour extraction maximale
+            return {
+                "document_type": "extrait",
+                "format_era": "moderne", 
+                "layout": "multi_page",
+                "visible_info": {
+                    "location_header": True,
+                    "majic_codes": True,
+                    "parcels_listed": True,
+                    "owners_listed": True,
+                    "addresses_present": True
+                },
+                "extraction_strategy": "complete"
+            }
+        except Exception as e:
+            logger.error(f"Erreur détection format: {e}")
             return {
                 "document_type": "extrait",
                 "format_era": "moderne", 
@@ -2238,14 +2380,13 @@ output example:
                 
                 # Parser la réponse EXACTEMENT comme Make
                 response_text = response.choices[0].message.content.strip()
-                try:
-                    result = json.loads(response_text)
-                    if "owners" in result and result["owners"]:
-                        page_owners = result["owners"]
-                        all_owners.extend(page_owners)
-                        logger.info(f"Page {page_num}: {len(page_owners)} proprietaire(s) extraits")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Erreur JSON page {page_num}: {e}")
+                result = safe_json_parse(response_text, f"make style page {page_num}")
+                if result and "owners" in result and result["owners"]:
+                    page_owners = result["owners"]
+                    all_owners.extend(page_owners)
+                    logger.info(f"Page {page_num}: {len(page_owners)} proprietaire(s) extraits")
+                else:
+                    logger.warning(f"Pas de propriétaires extraits page {page_num}")
                     
             except Exception as e:
                 logger.error(f"Erreur extraction proprietaires page {page_num}: {e}")
@@ -2256,77 +2397,26 @@ output example:
 
     def generate_id_with_openai_like_make(self, owner: Dict, prop: Dict) -> str:
         """
-        Génère l'ID parcellaire avec OpenAI EXACTEMENT comme Make.
-        Utilise le prompt exact et gpt-4o-mini comme Make.
-        """
-        try:
-            # Extraire les données comme Make
-            department = owner.get('department', '')
-            commune = owner.get('commune', '')
-            section = prop.get('Sec', '')
-            plan_number = prop.get('N° Plan', '')
-            
-            # PROMPT EXACT DE MAKE (copié à l'identique) 
-            make_id_prompt = f"""You are given property data with the following fields:
-- Department: a 2-digit number
-- Commune: a 3-digit number
-- Section: a string (can be fewer than 5 characters)
-- Plan number: a number (can be fewer than 4 digits)
-
-Your task is to generate a 14-character Parcel ID by combining these fields in the following format:
-
-Parcel ID = Department (2 digits) + Commune (3 digits) + Section (padded to 5 characters with leading zeros) + Plan number (padded to 4 digits with leading zeros)
-
-### Example:
-Input:
-Department: 25  
-Commune: 024  
-Section: A  
-Plan number: 333
-
-Output:
-ID: 250240000A0333
-
-Now, using this rule, generate the Parcel ID for the following inputs:
-Department: {department} 
-Commune: {commune}
-Section: {section}
-Plan number: {plan_number}
-
-Only return the 14-character ID in json format:
-{{"ID": "14 character ID here"}}
-"""
-
-            # Appel OpenAI avec PARAMÈTRES EXACTS DE MAKE
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Même modèle que Make pour ID
-                messages=[
-                    {
-                        "role": "user", 
-                        "content": make_id_prompt
-                    }
-                ],
-                max_tokens=2048,        # Même que Make
-                temperature=1,          # Même que Make
-                response_format={"type": "json_object"}  # Même que Make
-            )
-            
-            response_text = response.choices[0].message.content.strip()
-            result = json.loads(response_text)
-            
-            if "ID" in result:
-                generated_id = result["ID"]
-                logger.info(f"ID genere: {generated_id}")
-                return generated_id
-            
-        except Exception as e:
-            logger.warning(f"Erreur generation ID: {e}")
+        GÉNÉRATION D'ID CORRIGÉE - Utilise notre méthode locale ultra-robuste
+        au lieu du prompt OpenAI défaillant qui générait des IDs à 13 caractères.
         
-        # Fallback comme notre méthode locale
-        return self.generate_unique_id(
+        GARANTIT exactement 14 caractères à chaque fois.
+        """
+        # Extraire les données comme Make
+        department = owner.get('department', '')
+        commune = owner.get('commune', '')
+        section = prop.get('Sec', '')
+        plan_number = prop.get('N° Plan', '')
+        
+        # ✅ UTILISATION DIRECTE de notre méthode locale CORRIGÉE
+        # Plus fiable, plus rapide, et économise les tokens OpenAI
+        generated_id = self.generate_unique_id(
             str(department), str(commune), 
             str(section), str(plan_number)
         )
+        
+        logger.debug(f"ID généré localement (14 car. garantis): {generated_id}")
+        return generated_id
 
     def merge_like_make(self, owner: Dict, prop: Dict, unique_id: str, prop_type: str, pdf_path_name: str) -> Dict:
         """
