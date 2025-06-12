@@ -300,6 +300,7 @@ EXEMPLE 2:
 4. Récupère TOUTES les adresses complètes
 5. Identifie TOUTES les sections et numéros de parcelles
 6. Collecte TOUTES les contenances (surfaces)
+7. ⭐ PRÉFIXE (TRÈS RARE mais CRUCIAL) : Cherche activement les préfixes comme "ZY", "AB", "000AC" dans les tableaux "Propriété(s) non bâtie(s)" - ils apparaissent AVANT les sections !
 
 ⚠️ RÈGLES STRICTES:
 - Si tu vois une information partiellement, INCLUS-LA quand même
@@ -727,7 +728,7 @@ Retourne TOUT ce que tu vois en JSON:
             sect = str(section).strip().upper()
             # FORÇAGE STRICT: Toujours exactement 5 caractères
             if len(sect) < 5:
-                sect = sect.ljust(5, '0')  # Compléter à droite avec des zéros
+                sect = sect.rjust(5, '0')  # Compléter à GAUCHE avec des zéros
             elif len(sect) > 5:
                 sect = sect[:5]  # Tronquer à exactement 5
         else:
@@ -1251,6 +1252,10 @@ Output example:
             
             final_properties.append(prop)
         
+        # Séparation automatique des préfixes collés
+        if final_properties:
+            final_properties = self.separate_stuck_prefixes(final_properties)
+        
         # Propagation des valeurs
         if final_properties:
             final_properties = self.propagate_values_downward(final_properties, ['designation_parcelle', 'prefixe'])
@@ -1564,7 +1569,12 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 8. Collecte TOUTES les informations visibles
 9. Regroupe intelligemment les données dispersées
 10. Ne laisse RIEN passer, même les valeurs partielles
-11. Le champ `prefixe` est indiqué avant la désignation du lieu-dit dans la section 'Propriété(s) non bâtie(s)' (ex : ZY 8, ZY 6, etc.)
+11. ⭐ PRÉFIXE (TRÈS RARE mais CRUCIAL) : Le préfixe n'apparaît que dans quelques PDFs spéciaux, mais quand il existe, il est IMPÉRATIF de l'extraire !
+    - Position : dans les tableaux "Propriété(s) non bâtie(s)" AVANT la désignation du lieu-dit
+    - Format typique : "ZY 8", "AB 12", "000AC 5" → préfixe="ZY"/"AB"/"000AC", section="8"/"12"/"5"  
+    - Colonne souvent nommée "Préfixe", "Pfxe" ou précède directement la section
+    - Si AUCUN préfixe visible = "", ne JAMAIS inventer
+    - Si préfixe trouvé = l'extraire avec PRÉCISION ABSOLUE
 
 ⚠️ RÈGLES STRICTES:
 - ADAPTE ta lecture au format détecté
@@ -1615,6 +1625,46 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
                     last_seen_values[field] = updated_prop[field]
             updated_properties.append(updated_prop)
             
+        return updated_properties
+
+    def separate_stuck_prefixes(self, properties: List[Dict]) -> List[Dict]:
+        """
+        SÉPARATION AUTOMATIQUE des préfixes collés aux sections.
+        Détecte et sépare les patterns comme "302A" → préfixe="302", section="A"
+        """
+        import re
+        
+        updated_properties = []
+        separated_count = 0
+        
+        for prop in properties:
+            updated_prop = prop.copy()
+            section = str(updated_prop.get('section', '')).strip()
+            current_prefixe = str(updated_prop.get('prefixe', '')).strip()
+            
+            # Ne traiter que si la section n'est pas vide et le préfixe est vide
+            if section and not current_prefixe:
+                # Pattern pour détecter préfixe numérique collé à section alphabétique
+                # Exemples: "302A", "302 A", "302AB", "001ZD", "123AC", etc.
+                pattern = r'^(\d+)\s*([A-Z]+)$'  # \s* permet les espaces optionnels
+                match = re.match(pattern, section)
+                
+                if match:
+                    detected_prefixe = match.group(1)  # La partie numérique (302)
+                    detected_section = match.group(2)  # La partie alphabétique (A)
+                    
+                    # Mettre à jour les champs
+                    updated_prop['prefixe'] = detected_prefixe
+                    updated_prop['section'] = detected_section
+                    
+                    separated_count += 1
+                    logger.info(f"🔍 Préfixe séparé: '{section}' → préfixe='{detected_prefixe}' section='{detected_section}'")
+            
+            updated_properties.append(updated_prop)
+        
+        if separated_count > 0:
+            logger.info(f"✂️ Séparation automatique: {separated_count} préfixe(s) détecté(s) et séparé(s)")
+        
         return updated_properties
 
     def smart_merge_multi_page_data(self, all_page_data: List[Dict], filename: str) -> List[Dict]:
@@ -1712,6 +1762,9 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         
         # PHASE 3: Nettoyage et déduplication
         cleaned_properties = self.clean_and_deduplicate(merged_properties, filename)
+        
+        # Séparation automatique des préfixes collés
+        cleaned_properties = self.separate_stuck_prefixes(cleaned_properties)
         
         # Propager les valeurs de designation_parcelle et prefixe vers le bas
         cleaned_properties = self.propagate_values_downward(cleaned_properties, ['designation_parcelle', 'prefixe'])
@@ -2291,7 +2344,10 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
                     combined = self.merge_like_make(owner, {}, "", 'owners_only', pdf_path.name)
                     final_results.append(combined)
             
-            # ÉTAPE 4: Propagation des valeurs manquantes (prefixe, contenance détaillée)
+            # ÉTAPE 4: Séparation automatique des préfixes collés
+            final_results = self.separate_stuck_prefixes(final_results)
+            
+            # ÉTAPE 5: Propagation des valeurs manquantes (prefixe, contenance détaillée)
             final_results = self.propagate_values_downward(final_results, ['prefixe', 'contenance_ha', 'contenance_a', 'contenance_ca'])
             
             logger.info(f"Traitement Make termine: {len(final_results)} proprietes finales")
@@ -2424,13 +2480,33 @@ output example:
         Réplique la logique Google Sheets de Make.
         """
         
+        # SÉPARATION AUTOMATIQUE DES PRÉFIXES COLLÉS
+        import re
+        raw_section = str(prop.get('Sec', ''))
+        raw_prefixe = str(prop.get('Préfixe', prop.get('Pfxe', '')))
+        
+        # Si pas de préfixe et section contient pattern numérique+alphabétique
+        if not raw_prefixe and raw_section:
+            pattern = r'^(\d+)\s*([A-Z]+)$'  # \s* permet les espaces optionnels
+            match = re.match(pattern, raw_section)
+            if match:
+                final_prefixe = match.group(1)  # 302
+                final_section = match.group(2)  # A
+                logger.info(f"🔍 PRÉFIXE SÉPARÉ: '{raw_section}' → préfixe='{final_prefixe}' section='{final_section}'")
+            else:
+                final_prefixe = raw_prefixe
+                final_section = raw_section
+        else:
+            final_prefixe = raw_prefixe
+            final_section = raw_section
+        
         # Mapping exact comme dans Make Google Sheets
         merged = {
             # Colonnes A-E (informations parcelle)
             'department': str(owner.get('department', '')),  # Colonne A
             'commune': str(owner.get('commune', '')),        # Colonne B  
-            'prefixe': str(prop.get('Préfixe', prop.get('Pfxe', ''))),  # Colonne C (récupéré depuis pdfplumber)
-            'section': str(prop.get('Sec', '')),            # Colonne D
+            'prefixe': final_prefixe,                        # Colonne C (CORRIGÉ - séparation auto)
+            'section': final_section,                        # Colonne D (CORRIGÉ - séparation auto)
             'numero': str(prop.get('N° Plan', '')),         # Colonne E
             
             # Colonnes F-H (gestion/demande - vides dans Make)
