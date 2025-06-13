@@ -648,68 +648,22 @@ Retourne TOUT ce que tu vois en JSON:
         
         return None
 
-    def generate_parcel_id(self, department: str, commune: str, section: str = None, plan_number: int = None) -> str:
-        """
-        Génère un identifiant parcellaire selon la formule spécifiée.
-        
-        Args:
-            department: Code département (2 chiffres)
-            commune: Code commune (3 chiffres)
-            section: Section (5 caractères, optionnel)
-            plan_number: Numéro de plan (4 chiffres, optionnel)
-            
-        Returns:
-            Identifiant parcellaire formaté
-        """
-        # Utiliser les valeurs par défaut si non fournies
-        if section is None:
-            section = self.default_section
-        if plan_number is None:
-            plan_number = self.default_plan_number
-        
-        # Formater selon les règles
-        dept_formatted = department.zfill(2)
-        commune_formatted = commune.zfill(3)
-        section_formatted = str(section).ljust(5, '0')[:5]
-        plan_formatted = str(plan_number).zfill(4)
-        
-        parcel_id = f"{dept_formatted}{commune_formatted}{section_formatted}{plan_formatted}"
-        return parcel_id
-
-    def decompose_contenance(self, contenance: str) -> Dict[str, str]:
-        """
-        Décompose une contenance de 7 chiffres en hectares, ares et centiares.
-        
-        Args:
-            contenance: Chaîne de 7 chiffres (ex: "0130221")
-            
-        Returns:
-            Dictionnaire avec les clés HA, A, CA
-        """
-        if not contenance or contenance == "N/A" or len(contenance) != 7 or not contenance.isdigit():
-            return {"HA": "N/A", "A": "N/A", "CA": "N/A"}
-        
-        # Décomposer selon le format : HHAACC
-        ha = contenance[:2]  # 2 premiers chiffres (hectares)
-        a = contenance[2:4]  # 2 suivants (ares)
-        ca = contenance[4:7]  # 3 derniers (centiares)
-        
-        return {"HA": ha, "A": a, "CA": ca}
-
     def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
         """
-        GÉNÉRATION D'ID ULTRA-ROBUSTE - EXACTEMENT 14 CARACTÈRES GARANTIS
-        Format strict: DD(2) + CCC(3) + SSSSS(5) + NNNN(4) = 14
+        GÉNÉRATION D'ID FORMAT CADASTRAL FRANÇAIS STANDARD - 14 CARACTÈRES
+        
+        Format : DÉPARTEMENT(2) + COMMUNE(3) + SECTION(4 avec zéros) + PARCELLE(5) = 14 caractères
+        Section : Garder complète (ex: "302A" reste "302A", "A" devient "000A")
         
         Args:
             department: Code département
             commune: Code commune
-            section: Section cadastrale
+            section: Section cadastrale (ex: "302A", "A", "B")
             numero: Numéro de parcelle
-            prefixe: Préfixe optionnel (ignoré dans cette version)
+            prefixe: Préfixe optionnel (pour usage futur)
             
         Returns:
-            ID unique formaté sur EXACTEMENT 14 caractères (ex: 25227ZD0000005)
+            ID unique formaté sur EXACTEMENT 14 caractères
         """
         # ÉTAPE 1: Département - EXACTEMENT 2 caractères
         dept = str(department or "00").strip()
@@ -723,63 +677,63 @@ Retourne TOUT ce que tu vois en JSON:
             comm = "000"
         comm = comm.zfill(3)[:3]  # Force exactement 3 caractères
         
-        # ÉTAPE 3: Section - EXACTEMENT 5 caractères (POINT CRITIQUE)
+        # ÉTAPE 3: Section - EXACTEMENT 4 caractères (garder complète + zéros devant)
         if section and str(section).strip() and section != "N/A":
             sect = str(section).strip().upper()
-            # FORÇAGE STRICT: Toujours exactement 5 caractères
-            if len(sect) < 5:
-                sect = sect.rjust(5, '0')  # Compléter à GAUCHE avec des zéros
-            elif len(sect) > 5:
-                sect = sect[:5]  # Tronquer à exactement 5
+            
+            # Garder la section complète et compléter avec des zéros À GAUCHE pour faire 4 caractères
+            if len(sect) < 4:
+                sect = sect.zfill(4)  # Compléter avec des zéros à gauche
+            elif len(sect) > 4:
+                sect = sect[:4]  # Tronquer à 4 si trop long
+            # Si déjà 4 caractères, garder tel quel
         else:
-            sect = "0000A"  # Section par défaut (5 caractères garantis)
+            sect = "000A"  # Section par défaut (4 caractères)
         
         # Validation section
-        if len(sect) != 5:
+        if len(sect) != 4:
             logger.error(f"🚨 Section problème: '{section}' → '{sect}' (longueur: {len(sect)})")
-            sect = (sect + "00000")[:5]  # Force correction d'urgence
+            sect = (sect + "000A")[:4]  # Force correction d'urgence
         
-        # ÉTAPE 4: Numéro - EXACTEMENT 4 caractères
+        # ÉTAPE 4: Numéro - EXACTEMENT 5 caractères
         if numero and str(numero).strip() and numero != "N/A":
             num = str(numero).strip()
-            # Traitement selon le type
-            if num.isdigit():
-                num = num.zfill(4)[-4:]  # Derniers 4 chiffres si trop long
+            # Extraire les chiffres et compléter avec des zéros à gauche
+            num_clean = ''.join(filter(str.isdigit, num))
+            if num_clean:
+                num = num_clean.zfill(5)[-5:]  # Derniers 5 chiffres si trop long
             else:
-                # Pour les numéros alphanumériques, compléter ou tronquer
-                if len(num) < 4:
-                    num = num.ljust(4, '0')
-                elif len(num) > 4:
-                    num = num[:4]
+                num = "00001"  # Numéro par défaut si pas de chiffres
         else:
-            num = "0001"  # Numéro par défaut (4 caractères garantis)
+            num = "00001"  # Numéro par défaut (5 caractères)
         
         # Validation numéro
-        if len(num) != 4:
+        if len(num) != 5:
             logger.error(f"🚨 Numéro problème: '{numero}' → '{num}' (longueur: {len(num)})")
-            num = (num + "0000")[:4]  # Force correction d'urgence
+            num = (num + "00000")[:5]  # Force correction d'urgence
         
-        # ASSEMBLAGE FINAL
+        # ASSEMBLAGE FINAL : DÉPARTEMENT(2) + COMMUNE(3) + SECTION(4) + PARCELLE(5) = 14 caractères
         unique_id = f"{dept}{comm}{sect}{num}"
+        expected_length = 14
         
-        # VALIDATION ULTRA-STRICTE FINALE
-        if len(unique_id) != 14:
-            logger.error(f"🚨 ID LONGUEUR CRITIQUE: '{unique_id}' = {len(unique_id)} caractères")
+        # VALIDATION FINALE
+        if len(unique_id) != expected_length:
+            logger.error(f"🚨 ID LONGUEUR CRITIQUE: '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
             logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) sect='{sect}'({len(sect)}) num='{num}'({len(num)})")
             
-            # CORRECTION FORCÉE ABSOLUE
-            if len(unique_id) < 14:
-                unique_id = unique_id.ljust(14, '0')
+            # CORRECTION FORCÉE
+            if len(unique_id) < expected_length:
+                unique_id = unique_id.ljust(expected_length, '0')
                 logger.warning(f"🔧 ID COMPLÉTÉ: '{unique_id}'")
-            elif len(unique_id) > 14:
-                unique_id = unique_id[:14]
+            elif len(unique_id) > expected_length:
+                unique_id = unique_id[:expected_length]
                 logger.warning(f"🔧 ID TRONQUÉ: '{unique_id}'")
         
         # ASSERTION FINALE - Garantie absolue 14 caractères
-        if len(unique_id) != 14:
-            raise ValueError(f"ERREUR FATALE: ID '{unique_id}' = {len(unique_id)} caractères (devrait être 14)")
+        if len(unique_id) != expected_length:
+            raise ValueError(f"ERREUR FATALE: ID '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
         
-        logger.debug(f"✅ ID ROBUSTE: '{unique_id}' (longueur: {len(unique_id)})")
+        logger.debug(f"✅ ID 14 CARACTÈRES: '{unique_id}' (dept:{dept} comm:{comm} sect:{sect} num:{num})")
         return unique_id
 
     def extract_tables_with_pdfplumber(self, pdf_path: Path) -> Dict:
@@ -1042,8 +996,7 @@ Retourne TOUT ce que tu vois en JSON:
                 base64_image = base64.b64encode(image_data).decode('utf-8')
                 
                 # PROMPT SIMPLIFIÉ (style Make)
-                simple_prompt = """
-In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. Format the address as street address, city and post code. If city or postcode is not available, just leave it blank. There can be one or multiple owners. I want to extract all of them and return them in json format.
+                simple_prompt = """In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. Format the address as street address, city and post code. If city or postcode is not available, just leave it blank. There can be one or multiple owners. I want to extract all of them and return them in json format.
 
 Output example:
 {
@@ -1060,8 +1013,7 @@ Output example:
       "droit_reel": "Propriétaire/Indivision"
     }
   ]
-}
-"""
+}"""
                 
                 # Appel OpenAI (paramètres identiques à Make)
                 response = self.client.chat.completions.create(
@@ -2543,6 +2495,54 @@ output example:
         }
         
         return merged
+
+    def generate_parcel_id(self, department: str, commune: str, section: str = None, plan_number: int = None) -> str:
+        """
+        Génère un identifiant parcellaire selon la formule spécifiée.
+        
+        Args:
+            department: Code département (2 chiffres)
+            commune: Code commune (3 chiffres)
+            section: Section (5 caractères, optionnel)
+            plan_number: Numéro de plan (4 chiffres, optionnel)
+            
+        Returns:
+            Identifiant parcellaire formaté
+        """
+        # Utiliser les valeurs par défaut si non fournies
+        if section is None:
+            section = self.default_section
+        if plan_number is None:
+            plan_number = self.default_plan_number
+        
+        # Formater selon les règles
+        dept_formatted = department.zfill(2)
+        commune_formatted = commune.zfill(3)
+        section_formatted = str(section).ljust(5, '0')[:5]
+        plan_formatted = str(plan_number).zfill(4)
+        
+        parcel_id = f"{dept_formatted}{commune_formatted}{section_formatted}{plan_formatted}"
+        return parcel_id
+
+    def decompose_contenance(self, contenance: str) -> Dict[str, str]:
+        """
+        Décompose une contenance de 7 chiffres en hectares, ares et centiares.
+        
+        Args:
+            contenance: Chaîne de 7 chiffres (ex: "0130221")
+            
+        Returns:
+            Dictionnaire avec les clés HA, A, CA
+        """
+        if not contenance or contenance == "N/A" or len(contenance) != 7 or not contenance.isdigit():
+            return {"HA": "N/A", "A": "N/A", "CA": "N/A"}
+        
+        # Décomposer selon le format : HHAACC
+        ha = contenance[:2]  # 2 premiers chiffres (hectares)
+        a = contenance[2:4]  # 2 suivants (ares)
+        ca = contenance[4:7]  # 3 derniers (centiares)
+        
+        return {"HA": ha, "A": a, "CA": ca}
 
 
 def main():
