@@ -650,17 +650,21 @@ Retourne TOUT ce que tu vois en JSON:
 
     def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
         """
-        GÉNÉRATION D'ID FORMAT CADASTRAL FRANÇAIS STANDARD - 14 CARACTÈRES
+        GÉNÉRATION D'ID FORMAT CADASTRAL FRANÇAIS - 14 CARACTÈRES (CORRIGÉE)
         
-        Format : DÉPARTEMENT(2) + COMMUNE(3) + SECTION(4 avec zéros) + PARCELLE(5) = 14 caractères
-        Section : Garder complète (ex: "302A" reste "302A", "A" devient "000A")
+        Format selon spécifications client :
+        DÉPARTEMENT(2) + COMMUNE(3) + PRÉFIXE(3) + SECTION(2) + NUMÉRO(4) = 14 caractères
+        
+        RÈGLE IMPORTANTE : Les zéros de compensation sont toujours placés AVANT les caractères renseignés
+        - Section "A" → "0A" (PAS "A0")
+        - Préfixe vide → "000"
         
         Args:
-            department: Code département
+            department: Code département 
             commune: Code commune
-            section: Section cadastrale (ex: "302A", "A", "B")
+            section: Section cadastrale (ex: "A", "ZC")
             numero: Numéro de parcelle
-            prefixe: Préfixe optionnel (pour usage futur)
+            prefixe: Préfixe (peut être vide)
             
         Returns:
             ID unique formaté sur EXACTEMENT 14 caractères
@@ -669,57 +673,65 @@ Retourne TOUT ce que tu vois en JSON:
         dept = str(department or "00").strip()
         if dept == "N/A" or not dept:
             dept = "00"
-        dept = dept.zfill(2)[:2]  # Force exactement 2 caractères
+        dept = dept.zfill(2)[:2]  # Zéros à gauche, max 2 caractères
         
         # ÉTAPE 2: Commune - EXACTEMENT 3 caractères  
         comm = str(commune or "000").strip()
         if comm == "N/A" or not comm:
             comm = "000"
-        comm = comm.zfill(3)[:3]  # Force exactement 3 caractères
+        comm = comm.zfill(3)[:3]  # Zéros à gauche, max 3 caractères
         
-        # ÉTAPE 3: Section - EXACTEMENT 4 caractères (garder complète + zéros devant)
+        # ÉTAPE 3: Préfixe - EXACTEMENT 3 caractères
+        if prefixe and str(prefixe).strip() and prefixe != "N/A":
+            pref = str(prefixe).strip()
+            pref = pref.zfill(3)[:3]  # Zéros à gauche, max 3 caractères
+        else:
+            pref = "000"  # Préfixe par défaut
+        
+        # ÉTAPE 4: Section - EXACTEMENT 2 caractères (CORRECTION PRINCIPALE)
         if section and str(section).strip() and section != "N/A":
             sect = str(section).strip().upper()
             
-            # Garder la section complète et compléter avec des zéros À GAUCHE pour faire 4 caractères
-            if len(sect) < 4:
-                sect = sect.zfill(4)  # Compléter avec des zéros à gauche
-            elif len(sect) > 4:
-                sect = sect[:4]  # Tronquer à 4 si trop long
-            # Si déjà 4 caractères, garder tel quel
+            # 🔧 CORRECTION : Pour les sections, zéros AVANT les caractères
+            # Exemple : "A" → "0A", "ZC" → "ZC", "B" → "0B"
+            if len(sect) == 1:
+                sect = "0" + sect  # ZÉRO AVANT le caractère
+            elif len(sect) > 2:
+                sect = sect[-2:]  # Prendre les 2 derniers caractères
+            # Si déjà 2 caractères, garder tel quel
         else:
-            sect = "000A"  # Section par défaut (4 caractères)
+            sect = "0A"  # Section par défaut
         
         # Validation section
-        if len(sect) != 4:
-            logger.error(f"🚨 Section problème: '{section}' → '{sect}' (longueur: {len(sect)})")
-            sect = (sect + "000A")[:4]  # Force correction d'urgence
+        if len(sect) != 2:
+            logger.warning(f"🔧 Section corrigée: '{section}' → '{sect}' (longueur: {len(sect)})")
+            sect = (sect + "0A")[:2]  # Force correction d'urgence
         
-        # ÉTAPE 4: Numéro - EXACTEMENT 5 caractères
+        # ÉTAPE 5: Numéro - EXACTEMENT 4 caractères  
         if numero and str(numero).strip() and numero != "N/A":
             num = str(numero).strip()
             # Extraire les chiffres et compléter avec des zéros à gauche
             num_clean = ''.join(filter(str.isdigit, num))
             if num_clean:
-                num = num_clean.zfill(5)[-5:]  # Derniers 5 chiffres si trop long
+                num = num_clean.zfill(4)[-4:]  # Derniers 4 chiffres si trop long
             else:
-                num = "00001"  # Numéro par défaut si pas de chiffres
+                num = "0001"  # Numéro par défaut si pas de chiffres
         else:
-            num = "00001"  # Numéro par défaut (5 caractères)
+            num = "0001"  # Numéro par défaut
         
         # Validation numéro
-        if len(num) != 5:
-            logger.error(f"🚨 Numéro problème: '{numero}' → '{num}' (longueur: {len(num)})")
-            num = (num + "00000")[:5]  # Force correction d'urgence
+        if len(num) != 4:
+            logger.warning(f"🔧 Numéro corrigé: '{numero}' → '{num}' (longueur: {len(num)})")
+            num = (num + "0000")[:4]  # Force correction d'urgence
         
-        # ASSEMBLAGE FINAL : DÉPARTEMENT(2) + COMMUNE(3) + SECTION(4) + PARCELLE(5) = 14 caractères
-        unique_id = f"{dept}{comm}{sect}{num}"
+        # ASSEMBLAGE FINAL : DEPT(2) + COMM(3) + PRÉFIXE(3) + SECTION(2) + NUMÉRO(4) = 14 caractères
+        unique_id = f"{dept}{comm}{pref}{sect}{num}"
         expected_length = 14
         
         # VALIDATION FINALE
         if len(unique_id) != expected_length:
             logger.error(f"🚨 ID LONGUEUR CRITIQUE: '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
-            logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) sect='{sect}'({len(sect)}) num='{num}'({len(num)})")
+            logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) pref='{pref}'({len(pref)}) sect='{sect}'({len(sect)}) num='{num}'({len(num)})")
             
             # CORRECTION FORCÉE
             if len(unique_id) < expected_length:
@@ -733,7 +745,7 @@ Retourne TOUT ce que tu vois en JSON:
         if len(unique_id) != expected_length:
             raise ValueError(f"ERREUR FATALE: ID '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
         
-        logger.debug(f"✅ ID 14 CARACTÈRES: '{unique_id}' (dept:{dept} comm:{comm} sect:{sect} num:{num})")
+        logger.debug(f"✅ ID 14 CARACTÈRES CORRIGÉ: '{unique_id}' (dept:{dept} comm:{comm} pref:{pref} sect:{sect} num:{num})")
         return unique_id
 
     def extract_tables_with_pdfplumber(self, pdf_path: Path) -> Dict:
@@ -2415,12 +2427,13 @@ output example:
         commune = owner.get('commune', '')
         section = prop.get('Sec', '')
         plan_number = prop.get('N° Plan', '')
+        prefixe = prop.get('Préfixe', prop.get('Pfxe', ''))  # Support des deux variantes
         
         # ✅ UTILISATION DIRECTE de notre méthode locale CORRIGÉE
         # Plus fiable, plus rapide, et économise les tokens OpenAI
         generated_id = self.generate_unique_id(
             str(department), str(commune), 
-            str(section), str(plan_number)
+            str(section), str(plan_number), str(prefixe)
         )
         
         logger.debug(f"ID généré localement (14 car. garantis): {generated_id}")
