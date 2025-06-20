@@ -1,0 +1,4 @@
+﻿Département;Commune;Préfixe;Section;Numéro;Contenance HA;Contenance A;Contenance CA;Droit réel;Designation Parcelle;Nom Propri;Prénom Propri;N°MAJIC;Voie;CP;Ville;id;Fichier source
+01;001;302;A;123;05;;123;;;DUPONT;;;;;;test123;
+01;001;303;B;456;;;;;;MARTIN;;;;;;test456;
+01;001;304;C;789;02;15;;;;BERNARD;;;;;;test789;

@@ -650,21 +650,22 @@ Retourne TOUT ce que tu vois en JSON:
 
     def generate_unique_id(self, department: str, commune: str, section: str, numero: str, prefixe: str = "") -> str:
         """
-        GÉNÉRATION D'ID FORMAT CADASTRAL FRANÇAIS - 14 CARACTÈRES (CORRIGÉE)
+        GÉNÉRATION D'ID FORMAT CADASTRAL FRANÇAIS - 14 CARACTÈRES (NOUVELLE VERSION)
         
         Format selon spécifications client :
-        DÉPARTEMENT(2) + COMMUNE(3) + PRÉFIXE(3) + SECTION(2) + NUMÉRO(4) = 14 caractères
+        DÉPARTEMENT(2) + COMMUNE(3) + SECTION_AVEC_PRÉFIXE(5) + NUMÉRO(4) = 14 caractères
         
-        RÈGLE IMPORTANTE : Les zéros de compensation sont toujours placés AVANT les caractères renseignés
-        - Section "A" → "0A" (PAS "A0")
-        - Préfixe vide → "000"
+        NOUVELLE RÈGLE : Le préfixe s'intègre DANS la section (5 caractères total)
+        - Sans préfixe : Section "A" → "0000A", Section "ZD" → "000ZD"
+        - Avec préfixe : Préfixe "302" + Section "A" → "3020A"
+        - Avec préfixe : Préfixe "12" + Section "A" → "1200A"
         
         Args:
             department: Code département 
             commune: Code commune
             section: Section cadastrale (ex: "A", "ZC")
             numero: Numéro de parcelle
-            prefixe: Préfixe (peut être vide)
+            prefixe: Préfixe (peut être vide, max 3 caractères)
             
         Returns:
             ID unique formaté sur EXACTEMENT 14 caractères
@@ -681,33 +682,57 @@ Retourne TOUT ce que tu vois en JSON:
             comm = "000"
         comm = comm.zfill(3)[:3]  # Zéros à gauche, max 3 caractères
         
-        # ÉTAPE 3: Préfixe - EXACTEMENT 3 caractères
+        # ÉTAPE 3: Section avec préfixe intégré - EXACTEMENT 5 caractères
+        # Nettoyer la section et détecter si elle contient déjà le préfixe
+        if section and str(section).strip() and section != "N/A":
+            sect_raw = str(section).strip().upper()
+            
+            # Cas spécial : section contient déjà le préfixe avec espace (ex: "302 A")
+            if ' ' in sect_raw and prefixe and str(prefixe).strip():
+                parts = sect_raw.split(' ', 1)
+                if len(parts) == 2 and parts[0] == str(prefixe).strip():
+                    # La section contient déjà le préfixe, extraire la vraie section
+                    sect = parts[1]
+                    logger.debug(f"🔍 Section avec préfixe détectée: '{sect_raw}' → section='{sect}' préfixe='{prefixe}'")
+                else:
+                    sect = sect_raw
+            else:
+                sect = sect_raw
+        else:
+            sect = "A"  # Section par défaut
+        
+        # Nettoyer le préfixe
         if prefixe and str(prefixe).strip() and prefixe != "N/A":
             pref = str(prefixe).strip()
-            pref = pref.zfill(3)[:3]  # Zéros à gauche, max 3 caractères
         else:
-            pref = "000"  # Préfixe par défaut
+            pref = ""  # Pas de préfixe
         
-        # ÉTAPE 4: Section - EXACTEMENT 2 caractères (CORRECTION PRINCIPALE)
-        if section and str(section).strip() and section != "N/A":
-            sect = str(section).strip().upper()
-            
-            # 🔧 CORRECTION : Pour les sections, zéros AVANT les caractères
-            # Exemple : "A" → "0A", "ZC" → "ZC", "B" → "0B"
-            if len(sect) == 1:
-                sect = "0" + sect  # ZÉRO AVANT le caractère
-            elif len(sect) > 2:
-                sect = sect[-2:]  # Prendre les 2 derniers caractères
-            # Si déjà 2 caractères, garder tel quel
+        # Construire la section avec préfixe (5 caractères total)
+        if pref:
+            # Avec préfixe : préfixe + zéros de padding + section = 5 caractères
+            combined_length = len(pref) + len(sect)
+            if combined_length <= 5:
+                # Ajouter des zéros entre le préfixe et la section
+                padding_zeros = "0" * (5 - combined_length)
+                section_final = f"{pref}{padding_zeros}{sect}"
+            else:
+                # Si trop long, tronquer la section
+                available_for_section = 5 - len(pref)
+                if available_for_section > 0:
+                    section_final = f"{pref}{sect[:available_for_section]}"
+                else:
+                    # Préfixe trop long, le tronquer
+                    section_final = pref[:5]
         else:
-            sect = "0A"  # Section par défaut
+            # Sans préfixe : compléter avec des zéros à gauche (format cadastral)
+            section_final = sect.zfill(5)
         
-        # Validation section
-        if len(sect) != 2:
-            logger.warning(f"🔧 Section corrigée: '{section}' → '{sect}' (longueur: {len(sect)})")
-            sect = (sect + "0A")[:2]  # Force correction d'urgence
+        # Validation section finale
+        if len(section_final) != 5:
+            logger.warning(f"🔧 Section finale corrigée: '{section_final}' → longueur ajustée")
+            section_final = (section_final + "00000")[:5]  # Force 5 caractères
         
-        # ÉTAPE 5: Numéro - EXACTEMENT 4 caractères  
+        # ÉTAPE 4: Numéro - EXACTEMENT 4 caractères  
         if numero and str(numero).strip() and numero != "N/A":
             num = str(numero).strip()
             # Extraire les chiffres et compléter avec des zéros à gauche
@@ -724,14 +749,14 @@ Retourne TOUT ce que tu vois en JSON:
             logger.warning(f"🔧 Numéro corrigé: '{numero}' → '{num}' (longueur: {len(num)})")
             num = (num + "0000")[:4]  # Force correction d'urgence
         
-        # ASSEMBLAGE FINAL : DEPT(2) + COMM(3) + PRÉFIXE(3) + SECTION(2) + NUMÉRO(4) = 14 caractères
-        unique_id = f"{dept}{comm}{pref}{sect}{num}"
+        # ASSEMBLAGE FINAL : DEPT(2) + COMM(3) + SECTION_AVEC_PRÉFIXE(5) + NUMÉRO(4) = 14 caractères
+        unique_id = f"{dept}{comm}{section_final}{num}"
         expected_length = 14
         
         # VALIDATION FINALE
         if len(unique_id) != expected_length:
             logger.error(f"🚨 ID LONGUEUR CRITIQUE: '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
-            logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) pref='{pref}'({len(pref)}) sect='{sect}'({len(sect)}) num='{num}'({len(num)})")
+            logger.error(f"🔍 ANALYSE: dept='{dept}'({len(dept)}) comm='{comm}'({len(comm)}) section='{section_final}'({len(section_final)}) num='{num}'({len(num)})")
             
             # CORRECTION FORCÉE
             if len(unique_id) < expected_length:
@@ -745,7 +770,7 @@ Retourne TOUT ce que tu vois en JSON:
         if len(unique_id) != expected_length:
             raise ValueError(f"ERREUR FATALE: ID '{unique_id}' = {len(unique_id)} caractères (devrait être {expected_length})")
         
-        logger.debug(f"✅ ID 14 CARACTÈRES CORRIGÉ: '{unique_id}' (dept:{dept} comm:{comm} pref:{pref} sect:{sect} num:{num})")
+        logger.debug(f"✅ ID 14 CARACTÈRES NOUVEAU FORMAT: '{unique_id}' (dept:{dept} comm:{comm} section_avec_préfixe:{section_final} num:{num})")
         return unique_id
 
     def extract_tables_with_pdfplumber(self, pdf_path: Path) -> Dict:
@@ -2246,14 +2271,14 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
 
     def process_like_make(self, pdf_path: Path) -> List[Dict]:
         """
-        RÉPLIQUE EXACTE DU WORKFLOW MAKE
+        RÉPLIQUE EXACTE DU WORKFLOW MAKE - CORRIGÉE ANTI-DUPLICATION
         
         Suit exactement la même logique que l'automatisation Make :
         1. pdfplumber pour les tableaux (comme Python Anywhere)
         2. OpenAI Vision simple pour les propriétaires (prompt Make)
-        3. Traitement individuel (comme BasicFeeder) 
+        3. DÉTECTION TYPE PDF et traitement adapté
         4. Génération ID avec OpenAI (comme Make)
-        5. Fusion 1:1 simple
+        5. Fusion 1:1 intelligente
         """
         logger.info(f"🎯 TRAITEMENT STYLE MAKE pour {pdf_path.name}")
         
@@ -2270,43 +2295,85 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
                 logger.warning(f"Aucune donnée extraite pour {pdf_path.name}")
                 return []
             
-            # ÉTAPE 3: Traitement individuel (comme BasicFeeder Make)
+            # ÉTAPE 3: 🎯 DÉTECTION TYPE PDF ET TRAITEMENT ADAPTÉ
+            pdf_type = self.detect_pdf_ownership_type(owners, structured_data)
+            logger.info(f"🔍 Type PDF détecté: {pdf_type}")
+            
             final_results = []
             
-            # Traiter les propriétés non bâties (comme route 1 Make)
+            # Traiter les propriétés non bâties
             non_batie_props = structured_data.get('non_batie', [])
             if non_batie_props and owners:
                 logger.info("🏞️ Traitement propriétés non bâties style Make")
-                for owner in owners:
+                
+                if pdf_type == "single_owner":
+                    # TYPE 2: Un seul propriétaire pour toutes les propriétés
+                    main_owner = self.select_main_owner(owners)
+                    logger.info(f"👤 Propriétaire unique sélectionné: {main_owner.get('nom', '')} {main_owner.get('prenom', '')}")
+                    
                     for prop in non_batie_props:
                         if prop.get('Adresse'):  # Filtre comme Make
                             # Génération ID avec OpenAI (comme Make)
-                            unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                            unique_id = self.generate_id_with_openai_like_make(main_owner, prop)
                             
                             # Fusion 1:1 simple (comme Make)
-                            combined = self.merge_like_make(owner, prop, unique_id, 'non_batie', pdf_path.name)
+                            combined = self.merge_like_make(main_owner, prop, unique_id, 'non_batie', pdf_path.name)
                             final_results.append(combined)
+                
+                else:
+                    # TYPE 1: Plusieurs propriétaires (logique originale)
+                    logger.info("👥 Multiple propriétaires - association complexe")
+                    for owner in owners:
+                        for prop in non_batie_props:
+                            if prop.get('Adresse'):  # Filtre comme Make
+                                # Génération ID avec OpenAI (comme Make)
+                                unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                                
+                                # Fusion 1:1 simple (comme Make)
+                                combined = self.merge_like_make(owner, prop, unique_id, 'non_batie', pdf_path.name)
+                                final_results.append(combined)
             
-            # Traiter les propriétés bâties (comme route 2 Make)
+            # Traiter les propriétés bâties
             prop_batie = structured_data.get('prop_batie', [])
             if prop_batie and owners:
                 logger.info("🏠 Traitement propriétés bâties style Make")
-                for owner in owners:
+                
+                if pdf_type == "single_owner":
+                    # TYPE 2: Un seul propriétaire pour toutes les propriétés
+                    main_owner = self.select_main_owner(owners)
+                    
                     for prop in prop_batie:
                         if prop.get('Adresse'):  # Filtre comme Make
                             # Génération ID avec OpenAI (comme Make)
-                            unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                            unique_id = self.generate_id_with_openai_like_make(main_owner, prop)
                             
                             # Fusion 1:1 simple (comme Make)
-                            combined = self.merge_like_make(owner, prop, unique_id, 'batie', pdf_path.name)
+                            combined = self.merge_like_make(main_owner, prop, unique_id, 'batie', pdf_path.name)
                             final_results.append(combined)
+                            
+                else:
+                    # TYPE 1: Plusieurs propriétaires (logique originale)
+                    for owner in owners:
+                        for prop in prop_batie:
+                            if prop.get('Adresse'):  # Filtre comme Make
+                                # Génération ID avec OpenAI (comme Make)
+                                unique_id = self.generate_id_with_openai_like_make(owner, prop)
+                                
+                                # Fusion 1:1 simple (comme Make)
+                                combined = self.merge_like_make(owner, prop, unique_id, 'batie', pdf_path.name)
+                                final_results.append(combined)
             
             # Si pas de structured data, juste les propriétaires
             if not non_batie_props and not prop_batie and owners:
                 logger.info("👤 Seulement propriétaires (pas de tableaux)")
-                for owner in owners:
-                    combined = self.merge_like_make(owner, {}, "", 'owners_only', pdf_path.name)
+                if pdf_type == "single_owner":
+                    main_owner = self.select_main_owner(owners)
+                    combined = self.merge_like_make(main_owner, {}, "", 'owners_only', pdf_path.name)
                     final_results.append(combined)
+                else:
+                    for owner in owners:
+                        combined = self.merge_like_make(owner, {}, "", 'owners_only', pdf_path.name)
+                        final_results.append(combined)
             
             # ÉTAPE 4: Séparation automatique des préfixes collés
             final_results = self.separate_stuck_prefixes(final_results)
@@ -2320,6 +2387,103 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
         except Exception as e:
             logger.error(f"❌ Erreur traitement Make {pdf_path.name}: {e}")
             return []
+
+    def detect_pdf_ownership_type(self, owners: List[Dict], structured_data: Dict) -> str:
+        """
+        Détecte le type de PDF :
+        - "single_owner" : Un seul propriétaire réel (Type 2)
+        - "multiple_owners" : Plusieurs propriétaires distincts (Type 1)
+        
+        CORRIGÉ : Utilise le filtrage strict des vrais propriétaires
+        """
+        if not owners:
+            return "multiple_owners"
+        
+        # Compter les propriétaires uniques par nom ET filtrer les vrais propriétaires
+        unique_owners = set()
+        valid_owners = []  # Propriétaires qui passent le filtre strict
+        
+        for owner in owners:
+            nom = owner.get('nom', '').strip().upper()
+            prenom = owner.get('prenom', '').strip().upper()
+            owner_key = f"{nom}|{prenom}"
+            unique_owners.add(owner_key)
+            
+            # ✅ FILTRAGE STRICT : seuls les vrais propriétaires
+            if self.is_likely_real_owner(nom, prenom):
+                valid_owners.append(owner)
+        
+        num_properties = len(structured_data.get('non_batie', [])) + len(structured_data.get('prop_batie', []))
+        num_unique_owners = len(unique_owners)
+        num_valid_owners = len(valid_owners)
+        
+        logger.info(f"📊 Analyse: {num_unique_owners} extraits uniques, {num_valid_owners} vrais propriétaires, {num_properties} propriétés")
+        
+        # ✅ HEURISTIQUE PRINCIPALE : Si très peu de vrais propriétaires pour beaucoup de propriétés
+        if num_valid_owners <= 5 and num_properties > 50:
+            logger.info(f"🎯 Détection: PDF type single_owner ({num_valid_owners} vrais propriétaires pour {num_properties} propriétés)")
+            return "single_owner"
+        
+        # ✅ SÉCURITÉ : Si ratio propriétaires/propriétés très faible 
+        ratio_valid = num_valid_owners / max(num_properties, 1)
+        if ratio_valid < 0.1:  # Moins de 10% de propriétaires valides par rapport aux propriétés
+            logger.info(f"🎯 Détection: PDF type single_owner (ratio {ratio_valid:.3f} très faible)")
+            return "single_owner"
+        
+        # ✅ CAS MULTIPLE : Si beaucoup de propriétaires valides ET ratio élevé
+        if num_valid_owners > 10 and ratio_valid > 0.5:
+            logger.info(f"🎯 Détection: PDF type multiple_owners ({num_valid_owners} propriétaires pour {num_properties} propriétés)")
+            return "multiple_owners"
+        
+        # ✅ PAR DÉFAUT : Avec beaucoup de propriétés, probablement single owner
+        if num_properties > 100:
+            logger.info(f"🎯 Détection: PDF type single_owner par défaut (nombreuses propriétés: {num_properties})")
+            return "single_owner"
+        
+        # Dernier recours
+        logger.info(f"🎯 Détection: PDF type multiple_owners par défaut")
+        return "multiple_owners"
+
+    def select_main_owner(self, owners: List[Dict]) -> Dict:
+        """
+        Sélectionne le propriétaire principal quand il n'y en a qu'un seul réel.
+        Priorise les personnes morales (communes, etc.) et les plus fréquents.
+        """
+        if not owners:
+            return {}
+        
+        # Compter les occurrences de chaque propriétaire
+        owner_counts = {}
+        for owner in owners:
+            nom = owner.get('nom', '').strip()
+            prenom = owner.get('prenom', '').strip()
+            key = f"{nom}|{prenom}"
+            
+            if key not in owner_counts:
+                owner_counts[key] = {'owner': owner, 'count': 0}
+            owner_counts[key]['count'] += 1
+        
+        # Prioriser les personnes morales
+        legal_entity_keywords = [
+            'COMMUNE', 'VILLE', 'MAIRIE', 'ÉTAT', 'DÉPARTEMENT', 'RÉGION',
+            'SCI', 'SARL', 'SASU', 'EURL', 'SA', 'SOCIÉTÉ', 'ENTERPRISE'
+        ]
+        
+        for key, data in owner_counts.items():
+            nom = data['owner'].get('nom', '').upper()
+            for keyword in legal_entity_keywords:
+                if keyword in nom:
+                    logger.info(f"🏢 Propriétaire principal sélectionné (personne morale): {nom}")
+                    return data['owner']
+        
+        # Sinon, prendre le plus fréquent
+        most_frequent = max(owner_counts.values(), key=lambda x: x['count'])
+        main_owner = most_frequent['owner']
+        nom = main_owner.get('nom', '')
+        prenom = main_owner.get('prenom', '')
+        logger.info(f"👤 Propriétaire principal sélectionné (plus fréquent): {nom} {prenom}")
+        
+        return main_owner
 
     def extract_owners_make_style(self, pdf_path: Path) -> List[Dict]:
         """
@@ -2340,12 +2504,17 @@ Tu es un EXPERT en extraction de données cadastrales françaises. Ce document a
                 # Encoder l'image
                 base64_image = base64.b64encode(image_data).decode('utf-8')
                 
-                # PROMPT EXACT DE MAKE (copié à l'identique avec amélioration adresses)
+                # PROMPT EXACT DE MAKE (copié à l'identique avec amélioration adresses + personnes morales)
                 make_prompt = """In the following image, you will find information of owners such as nom, prenom, adresse, droit reel, numero proprietaire, department and commune. If there are any leading zero's before commune or deparment, keep it as it is. 
+
+IMPORTANT - LEGAL ENTITIES: Some owners might be legal entities (companies, municipalities, etc.) instead of individuals. For legal entities:
+- Put the full entity name in "nom" field
+- Leave "prenom" field empty
+- Look for keywords like: COMMUNE DE, VILLE DE, SCI, SARL, SASU, EURL, SA, SOCIÉTÉ, ENTREPRISE, ASSOCIATION, ÉTAT, DÉPARTEMENT, RÉGION
 
 For addresses: Extract street address, city and post code separately. If some parts are missing, try to extract whatever is available. If completely no address is found, leave all address fields blank.
 
-There can be one or multiple owners. I want to extract all of them and return them in json format.
+There can be one or multiple owners (individuals or legal entities). I want to extract all of them and return them in json format.
 output example:
 
 {"owners": [
@@ -2361,15 +2530,15 @@ output example:
 "droit reel": "Propriétaire/Indivision"
     },
     {
-        "nom": "LALLEMAND",
-        "prenom": "ERIC",
-         "street_address": "2 RUE DE PARIS",
-       "city": "KINGERSHEIM",
-        "post_code": "68260",
+        "nom": "COMMUNE DE BAR-LE-DUC",
+        "prenom": "",
+         "street_address": "MAIRIE",
+       "city": "BAR-LE-DUC",
+        "post_code": "55000",
         "numero_proprietaire": "MBXNZ8",
 "department": 21,
 "commune": 026,
-"droit reel": "Propriétaire/Indivision"
+"droit reel": "Propriétaire"
     }
 ]
 }"""
@@ -2413,6 +2582,10 @@ output example:
                 continue
         
         logger.info(f"Total proprietaires Make style: {len(all_owners)}")
+        
+        # Post-traitement pour détecter et corriger les personnes morales ratées
+        all_owners = self.detect_and_fix_legal_entities(all_owners)
+        
         return all_owners
 
     def generate_id_with_openai_like_make(self, owner: Dict, prop: Dict) -> str:
@@ -2425,19 +2598,103 @@ output example:
         # Extraire les données comme Make
         department = owner.get('department', '')
         commune = owner.get('commune', '')
-        section = prop.get('Sec', '')
+        raw_section = prop.get('Sec', '')
         plan_number = prop.get('N° Plan', '')
-        prefixe = prop.get('Préfixe', prop.get('Pfxe', ''))  # Support des deux variantes
+        raw_prefixe = prop.get('Préfixe', prop.get('Pfxe', ''))  # Support des deux variantes
+        
+        # 🔧 NETTOYAGE PRÉALABLE: Séparer préfixe et section si collés avec espace
+        import re
+        final_section = raw_section
+        final_prefixe = raw_prefixe
+        
+        # Si pas de préfixe et section contient pattern numérique+alphabétique avec espace
+        if not raw_prefixe and raw_section:
+            pattern = r'^(\d+)\s+([A-Z]+)$'  # \s+ pour détecter les espaces
+            match = re.match(pattern, raw_section)
+            if match:
+                final_prefixe = match.group(1)  # 302
+                final_section = match.group(2)  # A (sans espace)
+                logger.debug(f"🔧 Section nettoyée pour ID: '{raw_section}' → section='{final_section}' prefixe='{final_prefixe}'")
         
         # ✅ UTILISATION DIRECTE de notre méthode locale CORRIGÉE
         # Plus fiable, plus rapide, et économise les tokens OpenAI
         generated_id = self.generate_unique_id(
             str(department), str(commune), 
-            str(section), str(plan_number), str(prefixe)
+            str(final_section), str(plan_number), str(final_prefixe)
         )
         
         logger.debug(f"ID généré localement (14 car. garantis): {generated_id}")
         return generated_id
+
+    def detect_and_fix_legal_entities(self, owners: List[Dict]) -> List[Dict]:
+        """
+        Détecte et corrige les personnes morales (entreprises, communes, etc.)
+        qui auraient pu être mal extraites comme personnes physiques.
+        """
+        if not owners:
+            return owners
+            
+        # Mots-clés pour détecter les personnes morales
+        legal_entity_keywords = [
+            'COMMUNE DE', 'VILLE DE', 'MAIRIE DE',
+            'SCI', 'SARL', 'SASU', 'EURL', 'SA ', 'SAS ',
+            'SOCIÉTÉ', 'ENTREPRISE', 'COMPAGNIE',
+            'ASSOCIATION', 'FONDATION',
+            'ÉTAT', 'DÉPARTEMENT', 'RÉGION',
+            'SYNDICAT', 'COLLECTIVITÉ',
+            'ÉTABLISSEMENT', 'INSTITUTION',
+            'COOPÉRATIVE', 'MUTUELLE'
+        ]
+        
+        corrected_owners = []
+        
+        for owner in owners:
+            nom = str(owner.get('nom', '')).upper().strip()
+            prenom = str(owner.get('prenom', '')).strip()
+            
+            # Vérifier si c'est une personne morale
+            is_legal_entity = False
+            full_entity_name = nom
+            
+            # Cas 1: Le nom contient déjà un mot-clé de personne morale
+            for keyword in legal_entity_keywords:
+                if keyword in nom:
+                    is_legal_entity = True
+                    # Si il y a aussi un prénom, reconstruire le nom complet
+                    if prenom:
+                        full_entity_name = f"{nom} {prenom}".strip()
+                    break
+            
+            # Cas 2: Le prénom contient un mot-clé (mal extrait)
+            if not is_legal_entity and prenom:
+                prenom_upper = prenom.upper()
+                for keyword in legal_entity_keywords:
+                    if keyword in prenom_upper:
+                        is_legal_entity = True
+                        # Reconstruire le nom complet
+                        full_entity_name = f"{nom} {prenom}".strip()
+                        break
+            
+            # Cas 3: Nom + prénom forment ensemble une personne morale
+            if not is_legal_entity and nom and prenom:
+                combined = f"{nom} {prenom}".upper()
+                for keyword in legal_entity_keywords:
+                    if keyword in combined:
+                        is_legal_entity = True
+                        full_entity_name = combined
+                        break
+            
+            # Créer l'entrée corrigée
+            corrected_owner = owner.copy()
+            
+            if is_legal_entity:
+                corrected_owner['nom'] = full_entity_name
+                corrected_owner['prenom'] = ''  # Vider le prénom pour les personnes morales
+                logger.info(f"🏢 Personne morale détectée: '{full_entity_name}'")
+            
+            corrected_owners.append(corrected_owner)
+        
+        return corrected_owners
 
     def merge_like_make(self, owner: Dict, prop: Dict, unique_id: str, prop_type: str, pdf_path_name: str) -> Dict:
         """
@@ -2481,9 +2738,9 @@ output example:
             
             # Colonne I (designation + contenance détaillée)
             'designation_parcelle': str(prop.get('Adresse', '')),  # Colonne I
-            'contenance_ha': str(prop.get('HA', prop.get('Contenance', ''))),           # Hectares (fallback sur Contenance)
-            'contenance_a': str(prop.get('A', '')),             # Ares  
-            'contenance_ca': str(prop.get('CA', '')),           # Centiares
+            'contenance_ha': str(prop.get('HA', prop.get('Contenance', ''))).strip() if prop.get('HA', prop.get('Contenance', '')) else '',           # Hectares (fallback sur Contenance)
+            'contenance_a': str(prop.get('A', '')).strip() if prop.get('A', '') else '',             # Ares  
+            'contenance_ca': str(prop.get('CA', '')).strip() if prop.get('CA', '') else '',           # Centiares
             
             # Colonnes J-O (propriétaire)
             'nom': str(owner.get('nom', '')),                    # Colonne J
@@ -2556,6 +2813,79 @@ output example:
         ca = contenance[4:7]  # 3 derniers (centiares)
         
         return {"HA": ha, "A": a, "CA": ca}
+
+    def is_likely_real_owner(self, nom: str, prenom: str) -> bool:
+        """
+        Détermine si un nom/prénom correspond à un vrai propriétaire
+        ou à une adresse/lieu confondu par GPT-4 Vision.
+        
+        ULTRA-STRICT : Seuls les vrais propriétaires passent ce filtre.
+        """
+        # Mots-clés de personnes morales (vrais propriétaires)
+        legal_entity_keywords = [
+            'COMMUNE', 'VILLE', 'MAIRIE', 'ÉTAT', 'DÉPARTEMENT', 'RÉGION',
+            'SCI', 'SARL', 'SASU', 'EURL', 'SA', 'SOCIÉTÉ', 'ENTERPRISE'
+        ]
+        
+        nom_upper = nom.upper()
+        
+        # ✅ CRITÈRE 1: Personne morale reconnue avec mots-clés stricts
+        for keyword in legal_entity_keywords:
+            if keyword in nom_upper and len(nom.strip()) > 10:  # Nom suffisamment long
+                return True
+        
+        # ✅ CRITÈRE 2: Personne physique avec prénom ET nom de famille classique
+        if prenom.strip() and len(prenom.strip()) > 2:
+            # Le nom doit ressembler à un nom de famille (pas d'adresse)
+            if not self.looks_like_address(nom_upper):
+                return True
+        
+        # ❌ CRITÈRE 3: Rejet strict des adresses
+        if self.looks_like_address(nom_upper):
+            return False
+        
+        # ❌ CRITÈRE 4: Rejet des noms trop courts
+        if len(nom.strip()) < 5:
+            return False
+        
+        # ❌ CRITÈRE 5: Rejet des noms sans prénom et suspects
+        if not prenom.strip():
+            # Sans prénom, doit être une personne morale claire
+            return False
+        
+        # Par défaut : REJETER (approche conservative)
+        return False
+
+    def looks_like_address(self, nom_upper: str) -> bool:
+        """
+        Détermine si un nom ressemble à une adresse plutôt qu'à un propriétaire.
+        """
+        # Mots-clés d'adresses (très étendu)
+        address_keywords = [
+            'RUE', 'AVENUE', 'PLACE', 'CHEMIN', 'ROUTE', 'LIEU-DIT', 'IMPASSE',
+            'AU VILLAGE', 'AU ', 'LA ', 'LE ', 'LES ', 'DE LA', 'DU ', 'DES ',
+            'CHAMPS', 'PRES', 'BOIS', 'FORET', 'COTE', 'SUR ', 'SOUS ', 'HAUTE',
+            'DESSUS', 'DESSOUS', 'HAUT', 'BAS', 'GRAND', 'PETIT', 'VIEUX', 'NOUVEAU',
+            'GRANDE', 'PETITE', 'VIEILLE', 'NOUVELLE', 'RANG', 'TETE', 'BOUT',
+            'MILIEU', 'ENTRE', 'VERS', 'PRES DE', 'PROCHE', 'CUDRET', 'SEUT',
+            'ROCHE', 'PIERRE', 'MONT', 'COL', 'VALLEE', 'PLAINE', 'PLATEAU'
+        ]
+        
+        # Si le nom contient des mots-clés d'adresse
+        for keyword in address_keywords:
+            if keyword in nom_upper:
+                return True
+        
+        # Patterns d'adresses typiques
+        address_patterns = [
+            'GIRARDET', 'HAUTETERRE', 'HAUTEPIERRE', 'REISSILLE'
+        ]
+        
+        for pattern in address_patterns:
+            if pattern in nom_upper:
+                return True
+        
+        return False
 
 
 def main():
