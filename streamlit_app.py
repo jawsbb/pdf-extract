@@ -188,11 +188,13 @@ def main():
     st.markdown('<h1 class="main-header">Extracteur Cadastral Pro</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Solution professionnelle d\'extraction de données cadastrales françaises</p>', unsafe_allow_html=True)
     
-    # Session state pour conserver les résultats
+    # ✅ CORRECTION 1: Initialisation sécurisée du session state
     if 'extraction_results' not in st.session_state:
         st.session_state.extraction_results = None
     if 'processed_files' not in st.session_state:
         st.session_state.processed_files = []
+    if 'current_file_hash' not in st.session_state:
+        st.session_state.current_file_hash = None
     
     # Badges des fonctionnalités
     st.markdown("""
@@ -221,6 +223,26 @@ def main():
         label_visibility="collapsed"
     )
     
+    # ✅ CORRECTION 2: Vérification et nettoyage des résultats obsolètes
+    if uploaded_files:
+        # Créer un hash unique des fichiers actuels
+        current_files_hash = hash(tuple(f.name + str(len(f.getvalue())) for f in uploaded_files))
+        
+        # Si les fichiers ont changé, nettoyer les anciens résultats
+        if st.session_state.current_file_hash != current_files_hash:
+            st.session_state.extraction_results = None
+            st.session_state.processed_files = []
+            st.session_state.current_file_hash = current_files_hash
+            st.rerun()  # Forcer le refresh de l'interface
+    
+    # ✅ CORRECTION 3: Nettoyage quand plus de fichiers
+    elif st.session_state.extraction_results is not None:
+        # Si pas de fichiers mais des résultats existent, les nettoyer
+        st.session_state.extraction_results = None
+        st.session_state.processed_files = []
+        st.session_state.current_file_hash = None
+        st.rerun()  # Forcer le refresh de l'interface
+    
     # Options avancées dans un expander discret
     with st.expander("Options avancées", expanded=False):
         debug_mode = st.checkbox("Mode diagnostic (pour le support technique)", value=False)
@@ -233,13 +255,24 @@ def main():
     if uploaded_files:
         st.success(f"{len(uploaded_files)} fichier(s) chargé(s) avec succès")
         
+        # ✅ CORRECTION 4: Indicateur de l'état des résultats
+        if st.session_state.extraction_results:
+            st.info("💡 Résultats d'extraction disponibles ci-dessous. Cliquez sur 'Démarrer l'extraction' pour retraiter les fichiers.")
+        
         # Informations sur les fichiers
         with st.expander("Détails des fichiers", expanded=False):
             for file in uploaded_files:
                 file_size = len(file.getvalue()) / 1024 / 1024  # MB
                 st.write(f"• **{file.name}** - {file_size:.1f} MB")
         
-        if st.button("Démarrer l'extraction", type="primary", use_container_width=True):
+        # ✅ CORRECTION 5: Bouton avec état clair
+        button_text = "Retraiter les fichiers" if st.session_state.extraction_results else "Démarrer l'extraction"
+        
+        if st.button(button_text, type="primary", use_container_width=True):
+            
+            # ✅ CORRECTION 6: Nettoyage forcé avant nouveau traitement
+            st.session_state.extraction_results = None
+            st.session_state.processed_files = []
             
             with st.status("Traitement en cours...", expanded=True) as status:
                 
@@ -292,19 +325,41 @@ def main():
                             properties = extractor.process_like_make(pdf_file)
                             all_properties.extend(properties)
                         
-                        # Stocker les résultats dans session state
+                        # ✅ CORRECTION 7: Stockage sécurisé des résultats
                         if all_properties:
                             st.session_state.extraction_results = all_properties
                             st.session_state.processed_files = [f.name for f in uploaded_files]
+                            st.success(f"✅ Extraction terminée ! {len(all_properties)} propriétés extraites.")
+                            st.rerun()  # Forcer le refresh pour afficher les résultats
+                        else:
+                            st.warning("⚠️ Aucune propriété extraite. Vérifiez vos fichiers PDF.")
+                            st.session_state.extraction_results = []
                         
                         status.update(label="Extraction terminée!", state="complete")
                     
                     except Exception as e:
                         st.error(f"Erreur lors du traitement: {e}")
                         st.session_state.extraction_results = []
+                        status.update(label="Erreur pendant l'extraction", state="error")
     
-    # Afficher les résultats depuis session state
+    # ✅ CORRECTION 8: Affichage intelligent des résultats
     if st.session_state.extraction_results:
+        # Vérification de cohérence des résultats
+        if uploaded_files:
+            current_files = [f.name for f in uploaded_files]
+            if st.session_state.processed_files != current_files:
+                st.warning("⚠️ Attention : Les résultats affichés proviennent de fichiers différents.")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🧹 Nettoyer et retraiter", type="secondary"):
+                        st.session_state.extraction_results = None
+                        st.session_state.processed_files = []
+                        st.session_state.current_file_hash = None
+                        st.rerun()
+                with col2:
+                    if st.button("📋 Garder les résultats", type="primary"):
+                        st.info("Résultats conservés. Vous pouvez les télécharger ci-dessous.")
+        
         # Préparation des données
         df = pd.DataFrame(st.session_state.extraction_results)
         
@@ -447,7 +502,16 @@ def main():
             - Identification unique: ID 14 caractères
             """)
     elif not uploaded_files:
-        st.info("Sélectionnez un ou plusieurs fichiers PDF pour commencer l'extraction.")
+        # ✅ CORRECTION 9: Nettoyer les résultats si plus de fichiers
+        if st.session_state.extraction_results:
+            st.info("📋 Résultats précédents encore affichés. Rechargez des fichiers pour retraiter.")
+            if st.button("🧹 Nettoyer tous les résultats", type="secondary"):
+                st.session_state.extraction_results = None
+                st.session_state.processed_files = []
+                st.session_state.current_file_hash = None
+                st.rerun()
+        else:
+            st.info("Sélectionnez un ou plusieurs fichiers PDF pour commencer l'extraction.")
         
         # Informations d'aide
         with st.expander("Comment utiliser cet outil", expanded=False):

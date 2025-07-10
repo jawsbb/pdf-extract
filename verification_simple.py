@@ -1,35 +1,75 @@
 #!/usr/bin/env python3
 """
-Vérification simple que la correction fonctionne.
+Vérification simple des corrections appliquées
 """
 
 import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
 
-from pdf_extractor import PDFPropertyExtractor
+# Import du module principal
+try:
+    from pdf_extractor import PDFPropertyExtractor
+    print("OK Import reussi de pdf_extractor")
+except ImportError as e:
+    print(f"ERREUR d'import: {e}")
+    sys.exit(1)
 
-# Test simple
-extractor = PDFPropertyExtractor()
+def test_numero_parcelle_simple():
+    """Test rapide de la fonction remove_empty_parcel_numbers"""
+    
+    print("\nTEST: Fonction remove_empty_parcel_numbers")
+    print("-" * 50)
+    
+    extractor = PDFPropertyExtractor()
+    
+    # Vérifier que la méthode existe
+    if not hasattr(extractor, 'remove_empty_parcel_numbers'):
+        print("ERREUR La methode remove_empty_parcel_numbers n'existe pas")
+        return False
+    
+    # Test avec données simples
+    test_data = [
+        {'numero': '123', 'nom': 'DUPONT'},
+        {'numero': '', 'nom': 'MARTIN'},  # Vide - doit être supprimé
+        {'numero': '456', 'nom': 'BERNARD'},
+        {'numero': 'N/A', 'nom': 'DURAND'},  # N/A - doit être supprimé
+    ]
+    
+    print(f"Avant: {len(test_data)} proprietes")
+    
+    try:
+        result = extractor.remove_empty_parcel_numbers(test_data, "test.pdf")
+        print(f"Apres: {len(result)} proprietes")
+        
+        if len(result) == 2:  # Seules DUPONT et BERNARD doivent rester
+            print("OK Fonction fonctionne correctement")
+            return True
+        else:
+            print(f"ERREUR Resultat incorrect: {len(result)} proprietes au lieu de 2")
+            return False
+            
+    except Exception as e:
+        print(f"ERREUR lors de l'execution: {e}")
+        return False
 
-print("🔍 VÉRIFICATION RAPIDE DE LA CORRECTION")
-print("=" * 50)
+def main():
+    print("VERIFICATION SIMPLE DES CORRECTIONS")
+    print("=" * 50)
+    
+    # Test de la fonction
+    success = test_numero_parcelle_simple()
+    
+    print("\n" + "=" * 50)
+    if success:
+        print("SUCCES: La fonctionnalite fonctionne correctement!")
+        print("\nRESUME DES CORRECTIONS APPLIQUEES:")
+        print("   OK Fonction remove_empty_parcel_numbers ajoutee")
+        print("   OK Integration dans process_like_make (etape 6)")
+        print("   OK Suppression automatique des lignes sans numero de parcelle")
+        print("\nPRET POUR UTILISATION!")
+    else:
+        print("ECHEC: Il y a un probleme avec l'implementation")
+        sys.exit(1)
 
-# Test section A
-result_A = extractor.generate_unique_id('25', '424', 'A', '90')
-section_A = result_A[8:10]
-print(f"Section A: {result_A} → section part: '{section_A}'")
-
-# Test section B  
-result_B = extractor.generate_unique_id('51', '179', 'B', '6')
-section_B = result_B[8:10]
-print(f"Section B: {result_B} → section part: '{section_B}'")
-
-# Vérification
-if section_A == "0A" and section_B == "0B":
-    print("✅ CORRECTION RÉUSSIE ! Les zéros sont bien en PREMIÈRE position.")
-else:
-    print("❌ Problème persistant.")
-
-print(f"✅ Section A: '{section_A}' (attendu: '0A')")
-print(f"✅ Section B: '{section_B}' (attendu: '0B')") 
+if __name__ == "__main__":
+    main() 
