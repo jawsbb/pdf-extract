@@ -1,0 +1,200 @@
+[
+  {
+    "nom": "DARTOIS",
+    "prenom": "MICHELINE",
+    "droit_reel": "Usufruitier",
+    "street_address": "7 CHE DES VIGNES POUPINS",
+    "city": "MAILLY LE CHATEAU",
+    "post_code": "89660",
+    "numero_proprietaire": "MBDZ9M",
+    "department": "89",
+    "commune": "MAILLY-LE-CHATEAU"
+  },
+  {
+    "nom": "DUMONT",
+    "prenom": "NATHALIE",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "7 CHE DES VIGNES POUPINS",
+    "city": "MAILLY LE CHATEAU",
+    "post_code": "89660",
+    "numero_proprietaire": "MBJFZT",
+    "department": "89",
+    "commune": "MAILLY-LE-CHATEAU"
+  },
+  {
+    "nom": "DARTOIS",
+    "prenom": "FREDERIC",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "22 VIEILLE RUE D AUXERRE",
+    "city": "MAILLY LE CHATEAU",
+    "post_code": "89660",
+    "numero_proprietaire": "MBJFZS",
+    "department": "89",
+    "commune": "MAILLY-LE-CHATEAU"
+  },
+  {
+    "nom": "DARTOIS",
+    "prenom": "CHRISTOPHE",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "4 RUE DE LA TOUR BOUILLAT",
+    "city": "MAILLY LE CHATEAU",
+    "post_code": "89660",
+    "numero_proprietaire": "MBGQ36",
+    "department": "89",
+    "commune": "MAILLY-LE-CHATEAU"
+  },
+  {
+    "nom": "GABOIS",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "1074 GABOIS",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B083",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "LES PRINCESSES",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "1202 LES PRINCESSES",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B114",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "VAL DE PUSEAU OUEST",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "1810 VAL DE PUSEAU OUEST",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B137",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "LA RUE DU PARC",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "1683 LA RUE DU PARC",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B128",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "COTAS MARECHAUX",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "520 COTAS MARECHAUX",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B059",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "VIEILLE RUE D AUXERRE",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "20 22 VIEILLE RUE D AUXERRE",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "O350",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "RENVERS DES FORETS",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "167 RENVERS DES FORETS",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B121",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "CHEMIN BLANC",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "87 CHEMIN BLANC",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B049",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "MALVOISINE",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "74 MALVOISINE",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "B097",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "HAM DE MALVOISINE",
+    "prenom": "",
+    "droit_reel": "Propriétaire",
+    "street_address": "78 6 HAM DE MALVOISINE",
+    "city": "",
+    "post_code": "",
+    "numero_proprietaire": "X001",
+    "department": "",
+    "commune": ""
+  },
+  {
+    "nom": "DARTOIS",
+    "prenom": "MICHELINE",
+    "droit_reel": "Usufruitier",
+    "street_address": "Rue de l'Église",
+    "city": "Lyon",
+    "post_code": "69000",
+    "numero_proprietaire": "001",
+    "department": "Rhône",
+    "commune": "Lyon"
+  },
+  {
+    "nom": "DUMONT",
+    "prenom": "NATHALIE",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "Avenue des Champs",
+    "city": "Paris",
+    "post_code": "75000",
+    "numero_proprietaire": "002",
+    "department": "Paris",
+    "commune": "Paris"
+  },
+  {
+    "nom": "DARTOIS",
+    "prenom": "FRÉDÉRIC",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "Boulevard Saint-Germain",
+    "city": "Paris",
+    "post_code": "75000",
+    "numero_proprietaire": "003",
+    "department": "Paris",
+    "commune": "Paris"
+  },
+  {
+    "nom": "DARTOIS",
+    "prenom": "CHRISTOPHE",
+    "droit_reel": "Nu-propriétaire",
+    "street_address": "Rue de Rivoli",
+    "city": "Paris",
+    "post_code": "75000",
+    "numero_proprietaire": "004",
+    "department": "Paris",
+    "commune": "Paris"
+  }
+]

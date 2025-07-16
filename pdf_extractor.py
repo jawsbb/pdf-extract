@@ -769,6 +769,13 @@ EXEMPLE 2:
                         missing_commune_count += 1
                         if cleaned_commune != commune:
                             logger.debug(f"🧹 Commune nettoyée: '{commune}' → '{cleaned_commune}'")
+                    
+                    # 🎯 NOUVEAU : PROPAGATION FORCÉE du code pdfplumber sur TOUTES les lignes
+                    if commune and commune.isdigit() and len(commune) == 3:
+                        original_commune = prop.get("commune", "")
+                        if original_commune != commune:
+                            prop["commune"] = commune
+                            logger.debug(f"🔄 Commune forcée depuis pdfplumber: '{original_commune}' → '{commune}'")
                 
                 if missing_commune_count > 0:
                     logger.info(f"🔄 PROPAGATION FORCÉE: commune '{commune}' ajoutée à {missing_commune_count} propriétés")
