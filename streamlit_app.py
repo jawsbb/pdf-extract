@@ -303,7 +303,11 @@ def main():
                             st.write(f"Traitement: {pdf_file.name}")
                             progress_bar.progress((i + 1) / len(saved_files))
 
-                            properties = cadatral_pdf_extractor.extract_cadatral_info_from_pdf(pdf_file)
+                            properties = (
+                                cadatral_pdf_extractor.extract_cadatral_info_from_pdf(
+                                    pdf_file
+                                )
+                            )
                             all_properties.extend(properties)
 
                         if all_properties:
@@ -379,7 +383,9 @@ def main():
             )
 
         with col2:
-            unique_owners = len(df_display[df_display["numero_majic"].notna()]["numero_majic"].unique())
+            unique_owners = len(
+                df_display[df_display["numero_majic"].notna()]["numero_majic"].unique()
+            )
             st.markdown(
                 f"""
             <div class="metric-box">
